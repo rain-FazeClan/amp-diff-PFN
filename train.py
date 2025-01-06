@@ -8,6 +8,7 @@ import numpy as np
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc_auc_score
 from datetime import datetime
 import os
+import logging
 from model import AntibacterialPeptidePredictor  # 直接导入模型类
 
 
@@ -16,8 +17,8 @@ class AntibacterialPeptideDataset(Dataset):
         self.data = pd.read_csv(csv_path)
         # 将bacteria转换为数值索引
         self.bacteria_map = {
-            'MRSA': 0, 'E. coli': 1, 'A. baumannii': 2,
-            'P. aeruginosa': 3, 'K. pneumoniae': 4
+            'MRSA': 0, 'E.coli': 1, 'A.baumannii': 2,
+            'P.aeruginosa': 3, 'K.pneumoniae': 4
         }
         # 获取特征列（去掉前3列和最后1列）
         self.feature_columns = self.data.columns[3:-1].tolist()
@@ -33,7 +34,7 @@ class AntibacterialPeptideDataset(Dataset):
         row = self.data.iloc[idx]
         features = torch.FloatTensor(row[self.feature_columns].values.astype(np.float32))
         bacteria_idx = self.bacteria_map[row['bacteria']]
-        label = torch.FloatTensor([1.0 if row['mic'] <= 8 else 0.0])
+        label = torch.FloatTensor([1.0 if row['MIC'] <= 8 else 0.0])
         return features, bacteria_idx, label
 
 
@@ -73,7 +74,7 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
         batch_count += 1
 
         if (batch_idx + 1) % 100 == 0:
-            print(f'Batch {batch_idx + 1}, Average Loss: {total_loss / batch_count:.4f}')
+            logging.info(f'Batch {batch_idx + 1}, Average Loss: {total_loss / batch_count:.4f}')
 
     return total_loss / batch_count
 
@@ -137,12 +138,21 @@ def main():
                         help='Number of shared experts')
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu',
                         help='Device to use for training')
+    parser.add_argument('--patience', type=int, default=5,
+                        help='Number of epochs to wait before early stopping')
     args = parser.parse_args()
 
     # 创建保存模型的目录
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    save_dir = f'models_{timestamp}'
-    os.makedirs(save_dir, exist_ok=True)
+    model_dir = 'model'
+    os.makedirs(model_dir, exist_ok=True)
+
+    # 配置日志
+    logging.basicConfig(
+        filename=os.path.join(model_dir, 'training.log'),
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+    logging.info(f"Training started at {datetime.now().strftime('%Y%m%d_%H%M%S')}")
 
     # 保存训练配置
     config = {
@@ -171,47 +181,60 @@ def main():
     model = model.to(args.device)
 
     # 打印模型配置
-    print("\nModel Configuration:")
-    print(f"Hidden Dimensions: {args.hidden_dims}")
-    print(f"Experts per Task: {args.num_experts_per_task}")
-    print(f"Shared Experts: {args.num_shared_experts}")
-    print(f"Device: {args.device}")
+    logging.info("\nModel Configuration:")
+    logging.info(f"Hidden Dimensions: {args.hidden_dims}")
+    logging.info(f"Experts per Task: {args.num_experts_per_task}")
+    logging.info(f"Shared Experts: {args.num_shared_experts}")
+    logging.info(f"Device: {args.device}")
 
     # 定义损失函数和优化器
     criterion = nn.BCELoss()
     optimizer = optim.AdamW(model.parameters(), lr=args.lr)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.1, patience=3, verbose=True)
 
     # 记录最佳性能
     best_metrics = {'avg_f1': 0.0}
+    best_epoch = 0
+    early_stop_counter = 0
 
     # 训练循环
     for epoch in range(args.epochs):
-        print(f'\nEpoch {epoch + 1}/{args.epochs}')
+        logging.info(f'\nEpoch {epoch + 1}/{args.epochs}')
 
         # 训练
         train_loss = train_epoch(model, train_loader, criterion, optimizer, args.device)
-        print(f'Training Loss: {train_loss:.4f}')
+        logging.info(f'Training Loss: {train_loss:.4f}')
 
         # 评估
         test_metrics = evaluate(model, test_loader, args.device)
 
-        # 计算平均 F1 分数
+        # 计算平均 F1 分数和其他指标
         avg_f1 = np.mean([metrics['f1'] for metrics in test_metrics.values()])
+        avg_accuracy = np.mean([metrics['accuracy'] for metrics in test_metrics.values()])
+        avg_auc = np.mean([metrics['auc'] for metrics in test_metrics.values()])
 
         # 打印评估结果
-        print('\nTest Results:')
+        logging.info('\nTest Results:')
         for bacteria, metrics in test_metrics.items():
-            print(f'\n{bacteria}:')
+            logging.info(f'\n{bacteria}:')
             for metric_name, value in metrics.items():
-                print(f'{metric_name}: {value:.4f}')
+                logging.info(f'{metric_name}: {value:.4f}')
+
+        # 更新学习率
+        scheduler.step(avg_f1)
 
         # 更新最佳模型
         if avg_f1 > best_metrics['avg_f1']:
             best_metrics = {
                 'epoch': epoch + 1,
                 'avg_f1': avg_f1,
+                'avg_accuracy': avg_accuracy,
+                'avg_auc': avg_auc,
                 'test_metrics': test_metrics
             }
+            best_epoch = epoch + 1
+            early_stop_counter = 0
+
             # 保存最佳模型和配置
             torch.save({
                 'epoch': epoch + 1,
@@ -219,16 +242,35 @@ def main():
                 'optimizer_state_dict': optimizer.state_dict(),
                 'metrics': test_metrics,
                 'config': config
-            }, f'{save_dir}/best_model.pth')
+            }, f'{model_dir}/best_model.pth')
+        else:
+            early_stop_counter += 1
+
+        # 定期保存检查点
+        if (epoch + 1) % 5 == 0:
+            torch.save({
+                'epoch': epoch + 1,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'metrics': test_metrics,
+                'config': config
+            }, f'{model_dir}/checkpoint_epoch_{epoch + 1}.pth')
+
+        # 早停机制
+        if early_stop_counter >= args.patience:
+            logging.info(f'Early stopping at epoch {epoch + 1} as no improvement in {args.patience} epochs.')
+            break
 
     # 打印最佳性能
-    print('\nBest Performance:')
-    print(f'Epoch: {best_metrics["epoch"]}')
-    print(f'Average F1: {best_metrics["avg_f1"]:.4f}')
+    logging.info('\nBest Performance:')
+    logging.info(f'Epoch: {best_metrics["epoch"]}')
+    logging.info(f'Average F1: {best_metrics["avg_f1"]:.4f}')
+    logging.info(f'Average Accuracy: {best_metrics["avg_accuracy"]:.4f}')
+    logging.info(f'Average AUC: {best_metrics["avg_auc"]:.4f}')
     for bacteria, metrics in best_metrics['test_metrics'].items():
-        print(f'\n{bacteria}:')
+        logging.info(f'\n{bacteria}:')
         for metric_name, value in metrics.items():
-            print(f'{metric_name}: {value:.4f}')
+            logging.info(f'{metric_name}: {value:.4f}')
 
 
 if __name__ == '__main__':

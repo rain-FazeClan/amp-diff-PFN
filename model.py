@@ -64,6 +64,10 @@ class PLELayer(nn.Module):
         ])
 
     def forward(self, x):
+        # 如果输入是列表（多个任务的输出），则将其拼接为一个张量
+        if isinstance(x, list):
+            x = torch.cat(x, dim=1)  # 在特征维度上拼接
+
         # 计算所有专家的输出
         shared_expert_outputs = [expert(x) for expert in self.shared_experts]
 
@@ -137,7 +141,7 @@ class AntibacterialPeptidePredictor(nn.Module):
         x = self.feature_extractor(x)
 
         # 通过PLE层
-        task_features = x
+        task_features = [x] * self.num_tasks  # 初始化为相同的输入
         for ple_layer in self.ple_layers:
             task_features = ple_layer(task_features)
 
