@@ -95,15 +95,11 @@ class PLELayer(nn.Module):
 
 
 class AntibacterialPeptidePredictor(nn.Module):
-    """抗菌肽活性预测模型"""
-
-    def __init__(self, input_dim=40, hidden_dims=[128, 64],
-                 num_experts_per_task=3, num_shared_experts=2):
+    def __init__(self, input_dim=40, hidden_dims=[128, 64], num_experts_per_task=3, num_shared_experts=2):
         super(AntibacterialPeptidePredictor, self).__init__()
 
-        self.num_tasks = 5  # 五种菌群
+        self.num_tasks = 5
 
-        # 特征提取层
         self.feature_extractor = nn.Sequential(
             nn.Linear(input_dim, hidden_dims[0]),
             nn.ReLU(),
@@ -111,7 +107,6 @@ class AntibacterialPeptidePredictor(nn.Module):
             nn.Dropout(0.3)
         )
 
-        # PLE层
         self.ple_layers = nn.ModuleList([
             PLELayer(
                 input_dim=hidden_dims[0] if i == 0 else hidden_dims[1],
@@ -120,10 +115,9 @@ class AntibacterialPeptidePredictor(nn.Module):
                 num_shared_experts=num_shared_experts,
                 num_tasks=self.num_tasks
             )
-            for i in range(2)  # 使用2个PLE层
+            for i in range(2)
         ])
 
-        # 任务特定输出层
         self.task_towers = nn.ModuleList([
             nn.Sequential(
                 nn.Linear(hidden_dims[1], 32),
@@ -131,21 +125,17 @@ class AntibacterialPeptidePredictor(nn.Module):
                 nn.BatchNorm1d(32),
                 nn.Dropout(0.3),
                 nn.Linear(32, 1),
-                nn.Sigmoid()  # 输出活性预测概率
+                nn.Sigmoid()
             )
             for _ in range(self.num_tasks)
         ])
 
     def forward(self, x):
-        # 特征提取
         x = self.feature_extractor(x)
-
-        # 通过PLE层
-        task_features = [x] * self.num_tasks  # 初始化为相同的输入
+        task_features = [x] * self.num_tasks
         for ple_layer in self.ple_layers:
             task_features = ple_layer(task_features)
 
-        # 任务特定预测
         outputs = []
         for task_id in range(self.num_tasks):
             task_output = self.task_towers[task_id](task_features[task_id])
