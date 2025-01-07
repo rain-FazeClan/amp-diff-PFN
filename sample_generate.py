@@ -2,13 +2,13 @@ import pandas as pd
 import numpy as np
 
 # 读取CSV文件
-df = pd.read_csv('D:/amp/peptide_descriptors.csv')
+df = pd.read_csv('D:/amp/peptide.csv')
 
 # 定义菌群列名（注意：与你的CSV文件中的列名完全匹配，包括空格）
 bacteria_cols = {
-    'MRSA ': 'MRSA',
-    'E. coil ': 'E.coli',
-    'A. baannii ': 'A.baumannii',
+    'MRSA': 'MRSA',
+    'E. coil': 'E.coli',
+    'A. baumannii': 'A.baumannii',
     'P. aeruginosa': 'P.aeruginosa',
     'K. pneoniae': 'K.pneumoniae'
 }
@@ -19,16 +19,12 @@ negative_samples = []
 
 # 获取特征列名（所有的理化特性列）
 feature_cols = [
-    'pro_dipole_moment', 'pro_hyd_moment', 'pro_volume', 'pro_app_charge',
-    'pro_asa_hph', 'pro_asa_hyd', 'pro_asa_vdw', 'pro_coeff_280',
-    'pro_debye', 'pro_eccen', 'pro_helicity', 'pro_mass', 'pro_mobility',
-    'pro_net_charge', 'pro_patch_hyd', 'pro_pI_3D', 'pro_pI_seq',
-    'pro_r_gyr', 'pro_r_solv', 'pro_zeta', 'pro_zquadrupole',
-    'logP(o/w)', 'vol', 'Weight', 'b_rotN', 'a_acc', 'a_don',
-    'b_1rotN', 'KierFlex', 'mr', 'solvent_accessibility', 'charge',
-    'electrostatic_charge', 'hydrophobicity', 'side_chain_mass',
-    'surface_area', 'isoelectric_point', 'alpha_helix_propensity',
-    'beta_sheet_propensity', 'turn_propensity'
+    'solvent_accessibility', 'charge', 'electrostatic_charge', 'hydrophobicity', 'side_chain_mass',
+    'surface_area', 'isoelectric_point', 'alpha_helix_propensity','beta_sheet_propensity', 'turn_propensity',
+    'pro_dipole_moment', 'pro_hyd_moment', 'pro_volume', 'pro_app_charge', 'pro_asa_hph', 'pro_asa_hyd',
+    'pro_asa_vdw', 'pro_debye', 'pro_eccen', 'pro_mass', 'pro_mobility', 'pro_net_charge', 'pro_patch_hyd', 'pro_pI_3D',
+    'pro_pI_seq', 'pro_r_gyr', 'pro_r_solv', 'pro_zeta', 'pro_zquadrupole', 'logP(o/w)', 'vol',
+    'Weight', 'b_rotN', 'a_acc', 'a_don', 'b_1rotN', 'KierFlex', 'mr', 'E_rsol', 'E_rvdw', 'pmiX', 'pmiY', 'pmiZ'
 ]
 
 # 处理每种菌群的数据

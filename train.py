@@ -7,7 +7,6 @@ import time
 from sklearn.metrics import roc_auc_score
 from model import MultiTaskGNN
 
-
 def load_data(file_path):
     df = pd.read_csv(file_path)
     sequences = df['Sequence']
@@ -28,7 +27,6 @@ def load_data(file_path):
 
     return data_list
 
-
 def train(model, loader, optimizer, criterion):
     model.train()
     total_loss = 0
@@ -42,7 +40,6 @@ def train(model, loader, optimizer, criterion):
         total_loss += loss.item()
 
     return total_loss / len(loader)
-
 
 def test(model, loader, criterion):
     model.eval()
@@ -60,8 +57,10 @@ def test(model, loader, criterion):
     accuracy = total_correct / (len(loader.dataset) * len(outputs))
     return total_loss / len(loader), accuracy
 
-
 def main(args):
+    # Record start time
+    start_time = time.time()
+
     # Load data
     train_data = load_data(args.train_file)
     test_data = load_data(args.test_file)
@@ -78,12 +77,31 @@ def main(args):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     criterion = torch.nn.CrossEntropyLoss()
 
+    # Learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.9)
+
+    best_accuracy = 0.0
+
     # Training loop
     for epoch in range(args.epochs):
         train_loss = train(model, train_loader, optimizer, criterion)
         test_loss, test_accuracy = test(model, test_loader, criterion)
         print(f'Epoch {epoch+1}/{args.epochs}, Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.4f}')
 
+        # Step the scheduler
+        scheduler.step()
+
+        # Save the best model
+        if test_accuracy > best_accuracy:
+            best_accuracy = test_accuracy
+            if not os.path.exists('models'):
+                os.makedirs('models')
+            torch.save(model.state_dict(), 'models/best_model.pth')
+
+    # Record end time
+    end_time = time.time()
+    total_time = end_time - start_time
+    print(f'Total training time: {total_time:.2f} seconds')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train a multi-task GNN for antimicrobial peptide prediction.')

@@ -47,6 +47,12 @@ def prepare_dataset(test_size=0.2):
         train_data = train_data.reset_index(drop=True)
         test_data = test_data.reset_index(drop=True)
 
+        # 调整列顺序，将label放在第四列
+        cols = train_data.columns.tolist()
+        cols.insert(3, cols.pop(cols.index('label')))
+        train_data = train_data[cols]
+        test_data = test_data[cols]
+
         # 保存为CSV文件
         print("保存数据集...")
         train_data.to_csv('train_data.csv', index=False)
