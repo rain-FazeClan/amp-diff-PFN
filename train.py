@@ -9,19 +9,18 @@ from model import MultiTaskGNN
 def load_data(file_path):
     df = pd.read_csv(file_path)
     sequences = df['Sequence']
-    labels = df.iloc[:, -1]
-    features = df.iloc[:, 3:-1]
+    labels = df['label']
+    features = df.iloc[:, 4:]  # Adjust index to start from the 5th column for features
 
     # Ensure all features are numeric
     features = features.apply(pd.to_numeric, errors='coerce').fillna(0)
 
     data_list = []
     for i in range(len(df)):
-        x = torch.tensor(features.iloc[i].values, dtype=torch.float).view(-1, 1)
-        y = torch.tensor(labels[i], dtype=torch.long)
-        edge_index = torch.tensor([[0], [1]], dtype=torch.long)  # Dummy edge index
-        batch = torch.tensor([i], dtype=torch.long)
-        data = Data(x=x, edge_index=edge_index, y=y, batch=batch)
+        x = torch.tensor(features.iloc[i].values, dtype=torch.float).view(1, -1)  # Ensure x is 2D with shape (1, num_features)
+        y = torch.tensor([labels[i]], dtype=torch.long)
+        edge_index = torch.tensor([[0], [0]], dtype=torch.long)  # Dummy edge index for a single node graph
+        data = Data(x=x, edge_index=edge_index, y=y)
         data_list.append(data)
 
     return data_list
@@ -68,7 +67,7 @@ def main(args):
     test_loader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False)
 
     # Initialize model, optimizer, and loss function
-    num_node_features = train_data[0].x.size(1)
+    num_node_features = train_data[0].x.size(1)  # Adjust to reflect the correct feature dimension
     hidden_channels = args.hidden_channels
     num_tasks = 5  # Assuming 5 tasks for 5 different bacteria
 
