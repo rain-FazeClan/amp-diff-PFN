@@ -4,7 +4,6 @@ from torch_geometric.data import Data, DataLoader
 import argparse
 import os
 import time
-from sklearn.metrics import roc_auc_score
 from model import MultiTaskGNN
 
 def load_data(file_path):
