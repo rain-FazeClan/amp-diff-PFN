@@ -1,114 +1,138 @@
+# train_gan_pt.py
 import torch
-import pandas as pd
-from torch_geometric.data import Data, DataLoader
-import argparse
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+import numpy as np
 import os
 import time
-from model import MultiTaskGNN
+from data_loader import get_gan_dataloader # GAN DataLoader only for real positive samples
+from model.gan_pt import Generator, Discriminator
+from utils import NUM_AMINO_ACIDS # Number of actual amino acid characters
 
-def load_data(file_path):
-    df = pd.read_csv(file_path)
-    sequences = df['Sequence']
-    labels = df['label']
-    features = df.iloc[:, 4:]  # Adjust index to start from the 5th column for features
+def train_gan(data_filepath='data/preprocessed_data.npz', gen_save_path='models/weights/generator_pt.pth', disc_save_path='models/weights/discriminator_pt.pth', epochs=800, batch_size=128, latent_dim=100, log_interval=100):
+    """
+    训练GAN模型（PyTorch）。
 
-    # Ensure all features are numeric
-    features = features.apply(pd.to_numeric, errors='coerce').fillna(0)
+    Args:
+        data_filepath (str): 预处理数据文件路径。
+        gen_save_path (str): 生成器权重保存路径。
+        disc_save_path (str): 判别器权重保存路径。
+        epochs (int): 训练轮数。
+        batch_size (int): 批次大小。
+        latent_dim (int): 生成器输入的噪声向量维度。
+        log_interval (int): 打印训练信息的间隔。
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"使用设备: {device}")
 
-    data_list = []
-    for i in range(len(df)):
-        x = torch.tensor(features.iloc[i].values, dtype=torch.float).view(1, -1)  # Ensure x is 2D with shape (1, num_features)
-        y = torch.tensor([labels[i]], dtype=torch.long)
-        edge_index = torch.tensor([[0], [0]], dtype=torch.long)  # Dummy edge index for a single node graph
-        data = Data(x=x, edge_index=edge_index, y=y)
-        data_list.append(data)
+    gan_loader, max_sequence_length = get_gan_dataloader(data_filepath, batch_size)
 
-    return data_list
+    if gan_loader is None:
+        print("加载GAN训练数据失败，退出训练。")
+        return
 
-def train(model, loader, optimizer, criterion):
-    model.train()
-    total_loss = 0
+    # Number of amino acid channels for one-hot encoding
+    num_amino_acids_one_hot = NUM_AMINO_ACIDS
 
-    for data in loader:
-        optimizer.zero_grad()
-        outputs = model(data.x, data.edge_index, data.batch)
-        loss = sum(criterion(output, data.y) for output in outputs)
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item()
+    # Build models
+    generator = Generator(latent_dim, max_sequence_length, num_amino_acids_one_hot).to(device)
+    discriminator = Discriminator(max_sequence_length, num_amino_acids_one_hot).to(device)
 
-    return total_loss / len(loader)
+    # Define optimizers
+    optimizer_G = optim.Adam(generator.parameters(), lr=0.0002, betas=(0.5, 0.999))
+    optimizer_D = optim.Adam(discriminator.parameters(), lr=0.0002, betas=(0.5, 0.999)) # Common GAN practice: lr=0.0002, beta1=0.5
 
-def test(model, loader, criterion):
-    model.eval()
-    total_correct = 0
-    total_loss = 0
+    # Define loss function (Binary Cross Entropy)
+    # Use BCELoss for output probabilities between 0 and 1 from the discriminator
+    criterion = nn.BCELoss()
 
-    with torch.no_grad():
-        for data in loader:
-            outputs = model(data.x, data.edge_index, data.batch)
-            loss = sum(criterion(output, data.y) for output in outputs)
-            total_loss += loss.item()
-            preds = [output.argmax(dim=1) for output in outputs]
-            total_correct += sum((pred == data.y).sum().item() for pred in preds)
+    # Labels for training D and G
+    real_labels = torch.ones(batch_size, 1).to(device)
+    fake_labels = torch.zeros(batch_size, 1).to(device)
 
-    accuracy = total_correct / (len(loader.dataset) * len(outputs))
-    return total_loss / len(loader), accuracy
 
-def main(args):
-    # Record start time
-    start_time = time.time()
+    print("开始训练GAN（PyTorch）...")
+    for epoch in range(epochs):
+        start_time = time.time()
+        epoch_d_loss = 0.0
+        epoch_g_loss = 0.0
+        num_batches = 0
 
-    # Load data
-    train_data = load_data(args.train_file)
-    test_data = load_data(args.test_file)
+        for i, real_sequences_one_hot in enumerate(gan_loader):
+            real_sequences_one_hot = real_sequences_one_hot.to(device)
+            current_batch_size = real_sequences_one_hot.size(0) # Handle last batch if smaller
 
-    train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
-    test_loader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False)
+            # Adjust labels size for the last batch
+            if real_labels.size(0) != current_batch_size:
+                 real_labels = torch.ones(current_batch_size, 1).to(device)
+                 fake_labels = torch.zeros(current_batch_size, 1).to(device)
 
-    # Initialize model, optimizer, and loss function
-    num_node_features = train_data[0].x.size(1)  # Adjust to reflect the correct feature dimension
-    hidden_channels = args.hidden_channels
-    num_tasks = 5  # Assuming 5 tasks for 5 different bacteria
+            # --- Train Discriminator ---
+            optimizer_D.zero_grad()
 
-    model = MultiTaskGNN(num_node_features, hidden_channels, num_tasks)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
-    criterion = torch.nn.CrossEntropyLoss()
+            # Train with real data
+            output_real = discriminator(real_sequences_one_hot)
+            loss_real = criterion(output_real, real_labels)
+            loss_real.backward() # Compute gradients for real data
 
-    # Learning rate scheduler
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.9)
+            # Train with fake data
+            noise = torch.randn(current_batch_size, latent_dim, device=device) # Generate noise
+            fake_sequences_probs = generator(noise) # Generate fake sequences (probabilities)
 
-    best_accuracy = 0.0
+            # Detach generator output from generator computation graph for discriminator training
+            output_fake = discriminator(fake_sequences_probs.detach()) # Feed fake probs to D
+            loss_fake = criterion(output_fake, fake_labels)
+            loss_fake.backward() # Compute gradients for fake data
 
-    # Training loop
-    for epoch in range(args.epochs):
-        train_loss = train(model, train_loader, optimizer, criterion)
-        test_loss, test_accuracy = test(model, test_loader, criterion)
-        print(f'Epoch {epoch+1}/{args.epochs}, Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.4f}')
+            # Update Discriminator weights
+            loss_D = loss_real + loss_fake
+            optimizer_D.step()
 
-        # Step the scheduler
-        scheduler.step()
+            # --- Train Generator ---
+            optimizer_G.zero_grad()
 
-        # Save the best model
-        if test_accuracy > best_accuracy:
-            best_accuracy = test_accuracy
-            if not os.path.exists('models'):
-                os.makedirs('models')
-            torch.save(model.state_dict(), 'models/best_model.pth')
+            # Generate fake sequences again (retain graph for generator update)
+            noise = torch.randn(current_batch_size, latent_dim, device=device)
+            fake_sequences_probs = generator(noise) # Generate fake sequences
 
-    # Record end time
-    end_time = time.time()
-    total_time = end_time - start_time
-    print(f'Total training time: {total_time:.2f} seconds')
+            # Get discriminator output for fake sequences (Generator wants D to say REAL)
+            output_fake_for_G = discriminator(fake_sequences_probs)
+            loss_G = criterion(output_fake_for_G, real_labels) # Calculate G loss
+
+            # Update Generator weights
+            loss_G.backward()
+            optimizer_G.step()
+
+            epoch_d_loss += loss_D.item()
+            epoch_g_loss += loss_G.item()
+            num_batches += 1
+
+            # Log progress
+            if (i + 1) % log_interval == 0 or i == len(gan_loader) - 1:
+                 print(f'  Epoch [{epoch+1}/{epochs}] Batch [{i+1}/{len(gan_loader)}] | D Loss: {loss_D.item():.4f}, G Loss: {loss_G.item():.4f}')
+
+
+        avg_d_loss = epoch_d_loss / num_batches if num_batches > 0 else 0
+        avg_g_loss = epoch_g_loss / num_batches if num_batches > 0 else 0
+        end_time = time.time()
+
+        print(f'Epoch {epoch+1}/{epochs} completed | Avg D Loss: {avg_d_loss:.4f}, Avg G Loss: {avg_g_loss:.4f} | Time: {end_time-start_time:.2f} sec')
+
+        # Save models periodically
+        if (epoch + 1) % 100 == 0 or epoch + 1 == epochs:
+             torch.save(generator.state_dict(), gen_save_path.replace('.pth', f'_epoch{epoch+1}.pth'))
+             torch.save(discriminator.state_dict(), disc_save_path.replace('.pth', f'_epoch{epoch+1}.pth'))
+             print(f"模型权重在 Epoch {epoch+1} 保存到 {gen_save_path.replace('.pth', f'_epoch{epoch+1}.pth')} 等")
+
+    # Save final weights
+    torch.save(generator.state_dict(), gen_save_path)
+    torch.save(discriminator.state_dict(), disc_save_path)
+    print("\nGAN训练完成。")
+    print(f"最终生成器权重保存到: {gen_save_path}")
+    print(f"最终判别器权重保存到: {disc_save_path}")
+
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Train a multi-task GNN for antimicrobial peptide prediction.')
-    parser.add_argument('--train_file', type=str, required=True, help='Path to the training data file')
-    parser.add_argument('--test_file', type=str, required=True, help='Path to the testing data file')
-    parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training')
-    parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate')
-    parser.add_argument('--epochs', type=int, default=100, help='Number of training epochs')
-    parser.add_argument('--hidden_channels', type=int, default=64, help='Number of hidden channels in GNN layers')
-
-    args = parser.parse_args()
-    main(args)
+    os.makedirs('models/weights', exist_ok=True)
+    train_gan()
