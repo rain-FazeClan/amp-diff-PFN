@@ -1,123 +1,143 @@
-# main_gan_pt.py
+import argparse
 import os
-import numpy as np
+import sys
 
-# Import PyTorch specific modules
-from data_loader import preprocess_data, load_preprocessed_data # Use the _pt version
-from train_predictive import train_predictive # Use the _pt version
-import evaluate_predictive # Use the _pt version
-from train import train_gan # Use the _pt version
-from generate_peptides import generate_and_filter_peptides_gan # Use the _pt version
+# Add project root to sys.path to allow importing modules like data_generated
+# This is a common workaround for complex imports, adjust if needed
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ''))
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
+# Import main functions from other scripts
+from featured_data_generated import generate_features as run_generate_features
+from train_predictive import train_classifier as run_train_classifier
+from evaluate_predictive import evaluate_classifier as run_evaluate_classifier
+from train import train_gan as run_train_gan
+from generate_peptides import generate_and_filter_peptides as run_generate_peptides
+
+# Define paths (can be centralized in a config.py if preferred)
+DATA_DIR = 'data'
+CLASSIFY_DATA_DIR = 'classify_data'
+MODELS_DIR = 'models'
+RESULTS_DIR = 'results'
+
+GRAMPA_FILE = 'grampa.csv'
+NEGATIVE_FILE = 'origin_negative.csv'
+CLASSIFY_DATA_FILE = 'classify_data.csv'
+
+PREDICTIVE_MODEL_FILE = 'predictive_model.pkl'
+GENERATOR_MODEL_FILE = 'generator_model.pth'
+DISCRIMINATOR_MODEL_FILE = 'discriminator_model.pth'
+
+PREDICTIVE_EVAL_DIR = os.path.join(RESULTS_DIR, 'predictive_evaluation')
+GENERATED_PEPTIDES_DIR = os.path.join(RESULTS_DIR, 'generated_peptides')
 
 
-# Configuration paths and parameters
-GRAMPA_DATA = 'data/grampa.fasta' # Adjust if CSV
-NEGATIVE_DATA = 'data/negative_samples.fasta' # Adjust if CSV
-PREPROCESSED_DATA_PATH = 'data/preprocessed_data.npz'
+def main():
+    parser = argparse.ArgumentParser(description='Peptide Generation Project Pipeline')
+    parser.add_argument('--stage', type=str, default='all',
+                        choices=['all', 'features', 'train_classifier', 'evaluate_classifier', 'train_gan', 'generate_peptides'],
+                        help='Pipeline stage to run (default: all)')
+    parser.add_argument('--epochs', type=int, default=500, help='Number of epochs for GAN training')
+    parser.add_argument('--gan_batch_size', type=int, default=128, help='Batch size for GAN training')
+    parser.add_argument('--num_generate', type=int, default=10000, help='Number of peptides to generate')
+    parser.add_argument('--gen_batch_size', type=int, default=512, help='Batch size for peptide generation inference')
+    # Add more arguments for other hyperparameters if needed
 
-PREDICTIVE_WEIGHTS = 'models/weights/predictive_model_pt.pth'
-GENERATOR_WEIGHTS = 'models/weights/generator_pt.pth'
-DISCRIMINATOR_WEIGHTS = 'models/weights/discriminator_pt.pth'
+    args = parser.parse_args()
 
-# Data Preprocessing Parameters
-# Set to None to determine automatically from data
-# Or set to an integer like 100 if you want a fixed length and potentially truncate longer sequences
-MAX_SEQUENCE_LENGTH_PREPROCESS = None # Use None to calculate max length from data
+    print(f"Starting pipeline stage: {args.stage}")
 
-# Predictive Model Training Parameters
-PREDICTIVE_EPOCHS = 30
-PREDICTIVE_BATCH_SIZE = 64
+    if args.stage in ['all', 'features']:
+        print("\n--- Running Feature Generation ---")
+        grampa_path = os.path.join(DATA_DIR, GRAMPA_FILE)
+        negative_path = os.path.join(DATA_DIR, NEGATIVE_FILE)
+        classify_output_dir = CLASSIFY_DATA_DIR
+        # Ensure data files exist
+        if not os.path.exists(grampa_path):
+            print(f"Error: {grampa_path} not found.")
+            sys.exit(1)
+        if not os.path.exists(negative_path):
+            print(f"Error: {negative_path} not found.")
+            sys.exit(1)
+        run_generate_features(grampa_path, negative_path, classify_output_dir)
+        print("--- Feature Generation Complete ---")
+        if args.stage == 'features':
+            sys.exit(0)
 
-# GAN Training Parameters
-GAN_EPOCHS = 800 # GANs often require many epochs and fine-tuning
-GAN_BATCH_SIZE = 128
-LATENT_DIM = 100 # Dimension of the noise vector
+    classify_data_path = os.path.join(CLASSIFY_DATA_DIR, CLASSIFY_DATA_FILE)
+    if not os.path.exists(classify_data_path):
+         print(f"Error: {classify_data_path} not found. Run --stage features first.")
+         sys.exit(1)
 
-# Generation and Filtering Parameters
-GENERATION_ATTEMPTS = 2000 # Number of samples to try generating from the GAN
-GENERATION_COUNT = 20 # Number of potential peptides to select for wet lab
-MIN_GENERATED_LENGTH = 15
-MAX_GENERATED_LENGTH = 45
-GENERATION_TEMPERATURE = 0.8 # Lower values -> less diversity, higher values -> more diversity
+
+    if args.stage in ['all', 'train_classifier']:
+        print("\n--- Running Classifier Training ---")
+        predictive_model_path = os.path.join(MODELS_DIR, PREDICTIVE_MODEL_FILE)
+        run_train_classifier(classify_data_path, predictive_model_path, PREDICTIVE_EVAL_DIR)
+        print("--- Classifier Training Complete ---")
+        if args.stage == 'train_classifier':
+            sys.exit(0)
+
+    predictive_model_path = os.path.join(MODELS_DIR, PREDICTIVE_MODEL_FILE)
+    # Need the test data generated by train_classifier for evaluation
+    test_features_path = os.path.join(PREDICTIVE_EVAL_DIR, 'X_test.csv')
+    test_labels_path = os.path.join(PREDICTIVE_EVAL_DIR, 'y_test.csv')
+
+
+    if args.stage in ['all', 'evaluate_classifier']:
+         print("\n--- Running Classifier Evaluation ---")
+         # Ensure model and test data exist
+         if not os.path.exists(predictive_model_path):
+              print(f"Error: {predictive_model_path} not found. Run --stage train_classifier first.")
+              sys.exit(1)
+         if not os.path.exists(test_features_path) or not os.path.exists(test_labels_path):
+              print(f"Error: Test data not found in {PREDICTIVE_EVAL_DIR}. Run --stage train_classifier first.")
+              sys.exit(1)
+
+         run_evaluate_classifier(predictive_model_path, test_features_path, test_labels_path, PREDICTIVE_EVAL_DIR)
+         print("--- Classifier Evaluation Complete ---")
+         if args.stage == 'evaluate_classifier':
+              sys.exit(0)
+
+    if args.stage in ['all', 'train_gan']:
+        print("\n--- Running GAN Training ---")
+        generator_model_path = os.path.join(MODELS_DIR, GENERATOR_MODEL_FILE)
+        discriminator_model_path = os.path.join(MODELS_DIR, DISCRIMINATOR_MODEL_FILE)
+        # Hyperparameters from train.py could be passed via args here if needed
+        from train import NUM_EPOCHS, BATCH_SIZE as GAN_BATCH_SIZE, LR_G, LR_D, BETA1, D_TRAIN_RATIO, INITIAL_TEMP, MIN_TEMP, ANNEALING_STEPS # Load defaults
+
+        run_train_gan(epochs=args.epochs, batch_size=args.gan_batch_size,
+                      lr_g=LR_G, lr_d=LR_D, beta1=BETA1,
+                      d_train_ratio=D_TRAIN_RATIO,
+                      initial_temp=INITIAL_TEMP, min_temp=MIN_TEMP, annealing_steps=ANNEALING_STEPS,
+                      generator_save_path=generator_model_path, discriminator_save_path=discriminator_model_path)
+        print("--- GAN Training Complete ---")
+        if args.stage == 'train_gan':
+            sys.exit(0)
+
+    generator_model_path = os.path.join(MODELS_DIR, GENERATOR_MODEL_FILE)
+    if not os.path.exists(generator_model_path):
+         print(f"Error: {generator_model_path} not found. Run --stage train_gan first.")
+         sys.exit(1)
+
+    # Ensure classifier model exists for filtering
+    if not os.path.exists(predictive_model_path):
+         print(f"Error: {predictive_model_path} not found. Run --stage train_classifier first.")
+         sys.exit(1)
+
+
+    if args.stage in ['all', 'generate_peptides']:
+        print("\n--- Running Peptide Generation and Filtering ---")
+        output_dir = GENERATED_PEPTIDES_DIR
+        # Ensure descriptor calculation scripts are correctly implemented and imported in generate_peptides.py
+        run_generate_peptides(generator_model_path, predictive_model_path, args.num_generate, args.gen_batch_size, output_dir)
+        print("--- Peptide Generation and Filtering Complete ---")
+        if args.stage == 'generate_peptides':
+             sys.exit(0)
+
+    print("\nPipeline finished.")
 
 
 if __name__ == '__main__':
-    # Ensure directories exist
-    os.makedirs('data', exist_ok=True)
-    os.makedirs('models/weights', exist_ok=True)
-
-    # 1. Data Preprocessing
-    print("===== 数据预处理 (PyTorch流程) =====")
-    # preprocess_data saves max_sequence_length and num_amino_acids to the .npz
-    actual_max_len_used = preprocess_data(GRAMPA_DATA, NEGATIVE_DATA, PREPROCESSED_DATA_PATH, max_sequence_length=MAX_SEQUENCE_LENGTH_PREPROCESS)
-
-    # Check and get the determined max sequence length from the saved file
-    determined_max_len = None
-    if os.path.exists(PREPROCESSED_DATA_PATH):
-        try:
-            data_info = np.load(PREPROCESSED_DATA_PATH, allow_pickle=True)
-            if 'max_sequence_length' in data_info:
-                 determined_max_len = data_info['max_sequence_length'].item()
-                 print(f"从预处理数据文件获取实际最大序列长度: {determined_max_len}")
-            else:
-                 # Fallback if not explicitly saved (less reliable)
-                 if 'X_train' in data_info:
-                      determined_max_len = data_info['X_train'].shape[1]
-                      print(f"从预处理数据 X_train shape 获取实际最大序列长度: {determined_max_len} (警告: max_sequence_length 元数据缺失)")
-                 else:
-                      print(f"错误：预处理数据文件 {PREPROCESSED_DATA_PATH} 格式不正确或损坏，无法获取最大序列长度。")
-
-        except Exception as e:
-            print(f"加载预处理数据文件出错: {e}")
-            determined_max_len = None
-    else:
-        print("错误：预处理数据文件不存在。请先成功完成数据预处理。")
-
-    if determined_max_len is None:
-        print("无法获取序列最大长度，程序退出。")
-        exit()
-
-    # 2. Train Predictive Model (Required for filtering generated peptides)
-    print("\n===== 训练抗菌肽预测模型 (PyTorch) =====")
-    train_predictive(
-        data_filepath=PREPROCESSED_DATA_PATH,
-        model_save_path=PREDICTIVE_WEIGHTS,
-        epochs=PREDICTIVE_EPOCHS,
-        batch_size=PREDICTIVE_BATCH_SIZE
-    )
-
-    # 3. Evaluate Predictive Model (Optional, but good practice)
-    print("\n===== 评估抗菌肽预测模型 (PyTorch) =====")
-    evaluate_predictive(
-        data_filepath=PREPROCESSED_DATA_PATH,
-        model_load_path=PREDICTIVE_WEIGHTS
-    )
-
-    # 4. Train GAN
-    print("\n===== 训练GAN模型 (PyTorch) =====")
-    # The GAN training script will load max_sequence_length internally from data_filepath
-    train_gan(
-        data_filepath=PREPROCESSED_DATA_PATH, # Uses positive data from this file
-        gen_save_path=GENERATOR_WEIGHTS,
-        disc_save_path=DISCRIMINATOR_WEIGHTS,
-        epochs=GAN_EPOCHS,
-        batch_size=GAN_BATCH_SIZE,
-        latent_dim=LATENT_DIM
-    )
-
-    # 5. Generate and Filter Peptides using GAN
-    print("\n===== 使用GAN生成并筛选潜在的抗菌肽 (PyTorch) =====")
-    # Need to pass the determined_max_len to the generation function
-    generate_and_filter_peptides_gan(
-        generator_model_path=GENERATOR_WEIGHTS,
-        predictive_model_path=PREDICTIVE_WEIGHTS, # Use the trained predictor
-        num_peptides_to_generate=GENERATION_ATTEMPTS,
-        num_peptides_to_select=GENERATION_COUNT,
-        latent_dim=LATENT_DIM, # Needs to match training LATENT_DIM
-        max_sequence_length=determined_max_len, # Pass the determined length
-        min_peptide_length=MIN_GENERATED_LENGTH,
-        max_peptide_length=MAX_GENERATED_LENGTH,
-        temperature=GENERATION_TEMPERATURE
-    )
-
-    print("\n===== 所有步骤完成 (PyTorch流程) =====")
+    main()

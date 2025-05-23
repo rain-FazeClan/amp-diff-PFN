@@ -1,138 +1,164 @@
-# train_gan_pt.py
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
-import numpy as np
 import os
 import time
-from data_loader import get_gan_dataloader # GAN DataLoader only for real positive samples
-from model import Generator, Discriminator
-from utils import NUM_AMINO_ACIDS # Number of actual amino acid characters
+from utils import vocab, MAX_LEN, NUM_DISC_CLASSES, PAD_TOKEN # Import shared utilities
+from data_loader import create_gan_dataloader
+from model import Generator, Discriminator, EMBEDDING_DIM, HIDDEN_DIM, LATENT_DIM # Import model definitions and hyperparameters
 
-def train_gan(data_filepath='data/preprocessed_data.npz', gen_save_path='models/weights/generator_pt.pth', disc_save_path='models/weights/discriminator_pt.pth', epochs=800, batch_size=128, latent_dim=100, log_interval=100):
-    """
-    训练GAN模型（PyTorch）。
+# --- Configuration ---
+BATCH_SIZE = 128
+NUM_EPOCHS = 1000 # GANs often require many epochs, starting low for example
+LR_G = 0.0001
+LR_D = 0.0001
+BETA1 = 0.5 # For Adam optimizer
+D_TRAIN_RATIO = 1 # Train D this many times per G training step
 
-    Args:
-        data_filepath (str): 预处理数据文件路径。
-        gen_save_path (str): 生成器权重保存路径。
-        disc_save_path (str): 判别器权重保存路径。
-        epochs (int): 训练轮数。
-        batch_size (int): 批次大小。
-        latent_dim (int): 生成器输入的噪声向量维度。
-        log_interval (int): 打印训练信息的间隔。
-    """
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"使用设备: {device}")
+# Gumbel-Softmax temperature
+INITIAL_TEMP = 1.0
+MIN_TEMP = 0.1
+ANNEALING_STEPS = 2000 # Number of training steps over which to anneal temperature
 
-    gan_loader, max_sequence_length = get_gan_dataloader(data_filepath, batch_size)
+# Model saving
+MODELS_DIR = 'models'
+GENERATOR_MODEL_FILE = 'generator_model.pth'
+DISCRIMINATOR_MODEL_FILE = 'discriminator_model.pth'
 
-    if gan_loader is None:
-        print("加载GAN训练数据失败，退出训练。")
-        return
+# Device
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device for GAN training: {device}")
 
-    # Number of amino acid channels for one-hot encoding
-    num_amino_acids_one_hot = NUM_AMINO_ACIDS
+# Gumbel-Softmax temperature schedule function
+def get_temp(step, initial_temp, min_temp, annealing_steps):
+    # Ensure steps don't exceed annealing_steps to prevent negative temp
+    step = min(step, annealing_steps)
+    return max(min_temp, initial_temp * (1 - step / annealing_steps))
 
-    # Build models
-    generator = Generator(latent_dim, max_sequence_length, num_amino_acids_one_hot).to(device)
-    discriminator = Discriminator(max_sequence_length, num_amino_acids_one_hot).to(device)
+def train_gan(epochs, batch_size, lr_g, lr_d, beta1, d_train_ratio,
+              initial_temp, min_temp, annealing_steps,
+              generator_save_path, discriminator_save_path):
 
-    # Define optimizers
-    optimizer_G = optim.Adam(generator.parameters(), lr=0.0002, betas=(0.5, 0.999))
-    optimizer_D = optim.Adam(discriminator.parameters(), lr=0.0002, betas=(0.5, 0.999)) # Common GAN practice: lr=0.0002, beta1=0.5
+    # Data loading
+    dataloader, _ = create_gan_dataloader(batch_size)
 
-    # Define loss function (Binary Cross Entropy)
-    # Use BCELoss for output probabilities between 0 and 1 from the discriminator
-    criterion = nn.BCELoss()
+    # Models
+    generator = Generator(vocab_size=vocab.vocab_size,
+                          embedding_dim=EMBEDDING_DIM,
+                          hidden_dim=HIDDEN_DIM,
+                          latent_dim=LATENT_DIM,
+                          max_len=MAX_LEN,
+                          pad_idx=vocab.pad_idx).to(device)
 
-    # Labels for training D and G
-    real_labels = torch.ones(batch_size, 1).to(device)
-    fake_labels = torch.zeros(batch_size, 1).to(device)
+    discriminator = Discriminator(vocab_size=vocab.vocab_size,
+                                embedding_dim=EMBEDDING_DIM,
+                                hidden_dim=HIDDEN_DIM,
+                                num_classes=NUM_DISC_CLASSES,
+                                pad_idx=vocab.pad_idx).to(device)
 
+    # Loss and optimizers
+    criterion = nn.CrossEntropyLoss()
+    optimizer_g = optim.Adam(generator.parameters(), lr=lr_g, betas=(beta1, 0.999))
+    optimizer_d = optim.Adam(discriminator.parameters(), lr=lr_d, betas=(beta1, 0.999))
 
-    print("开始训练GAN（PyTorch）...")
+    print("Starting GAN training...")
+
+    total_steps = 0
+    start_time = time.time()
+
     for epoch in range(epochs):
-        start_time = time.time()
-        epoch_d_loss = 0.0
-        epoch_g_loss = 0.0
-        num_batches = 0
-
-        for i, real_sequences_one_hot in enumerate(gan_loader):
-            real_sequences_one_hot = real_sequences_one_hot.to(device)
-            current_batch_size = real_sequences_one_hot.size(0) # Handle last batch if smaller
-
-            # Adjust labels size for the last batch
-            if real_labels.size(0) != current_batch_size:
-                 real_labels = torch.ones(current_batch_size, 1).to(device)
-                 fake_labels = torch.zeros(current_batch_size, 1).to(device)
+        epoch_start_time = time.time()
+        for i, (real_sequences, real_labels) in enumerate(dataloader):
+            batch_size = real_sequences.size(0) # Actual batch size (last batch might be smaller)
 
             # --- Train Discriminator ---
-            optimizer_D.zero_grad()
+            discriminator.zero_grad()
 
-            # Train with real data
-            output_real = discriminator(real_sequences_one_hot)
-            loss_real = criterion(output_real, real_labels)
-            loss_real.backward() # Compute gradients for real data
+            # Real data
+            real_sequences = real_sequences.to(device)
+            # Map original labels (0, 1) to discriminator classes (0, 1)
+            # Ensure real_labels batch matches real_sequences batch size
+            real_d_labels = real_labels.to(device) # Already 0 for neg, 1 for pos
+            d_output_real = discriminator(real_sequences)
+            errD_real = criterion(d_output_real, real_d_labels)
 
-            # Train with fake data
-            noise = torch.randn(current_batch_size, latent_dim, device=device) # Generate noise
-            fake_sequences_probs = generator(noise) # Generate fake sequences (probabilities)
 
-            # Detach generator output from generator computation graph for discriminator training
-            output_fake = discriminator(fake_sequences_probs.detach()) # Feed fake probs to D
-            loss_fake = criterion(output_fake, fake_labels)
-            loss_fake.backward() # Compute gradients for fake data
+            # Fake data
+            noise = torch.randn(batch_size, LATENT_DIM, device=device)
+            # Get Gumbel-Softmax generated sequence (continuous)
+            current_temp = get_temp(total_steps, initial_temp, min_temp, annealing_steps)
+            fake_sequences_soft = generator(noise, current_temp)
 
-            # Update Discriminator weights
-            loss_D = loss_real + loss_fake
-            optimizer_D.step()
+            # Detach fake data for D training
+            d_output_fake = discriminator(fake_sequences_soft.detach())
+            # Discriminator's target label for fake data is 2
+            fake_d_labels = torch.full((batch_size,), 2, dtype=torch.long, device=device)
+            errD_fake = criterion(d_output_fake, fake_d_labels)
+
+            # Total discriminator loss
+            errD = errD_real + errD_fake
+            errD.backward()
+            optimizer_d.step()
 
             # --- Train Generator ---
-            optimizer_G.zero_grad()
+            # Train G more or less frequently than D depending on training progress
+            if total_steps % d_train_ratio == 0:
+                generator.zero_grad()
 
-            # Generate fake sequences again (retain graph for generator update)
-            noise = torch.randn(current_batch_size, latent_dim, device=device)
-            fake_sequences_probs = generator(noise) # Generate fake sequences
+                # Generate fake data again (this time for G's graph)
+                noise = torch.randn(batch_size, LATENT_DIM, device=device)
+                fake_sequences_soft = generator(noise, current_temp)
 
-            # Get discriminator output for fake sequences (Generator wants D to say REAL)
-            output_fake_for_G = discriminator(fake_sequences_probs)
-            loss_G = criterion(output_fake_for_G, real_labels) # Calculate G loss
+                # Get Discriminator output for fake data
+                d_output_fake_for_g = discriminator(fake_sequences_soft)
 
-            # Update Generator weights
-            loss_G.backward()
-            optimizer_G.step()
+                # Generator's target label: Trick D into thinking fake is Real Positive (1)
+                target_labels_for_g = torch.full((batch_size,), 1, dtype=torch.long, device=device)
+                errG = criterion(d_output_fake_for_g, target_labels_for_g)
 
-            epoch_d_loss += loss_D.item()
-            epoch_g_loss += loss_G.item()
-            num_batches += 1
+                errG.backward()
+                optimizer_g.step()
 
-            # Log progress
-            if (i + 1) % log_interval == 0 or i == len(gan_loader) - 1:
-                 print(f'  Epoch [{epoch+1}/{epochs}] Batch [{i+1}/{len(gan_loader)}] | D Loss: {loss_D.item():.4f}, G Loss: {loss_G.item():.4f}')
+            total_steps += 1
 
+            # --- Logging ---
+            if total_steps % 100 == 0:
+                 with torch.no_grad():
+                     # Evaluate Discriminator accuracy
+                     real_preds = torch.argmax(d_output_real, dim=1)
+                     # Need to handle potential smaller last batch when calculating metrics
+                     real_acc = (real_preds == real_d_labels[:real_preds.size(0)]).float().mean().item()
 
-        avg_d_loss = epoch_d_loss / num_batches if num_batches > 0 else 0
-        avg_g_loss = epoch_g_loss / num_batches if num_batches > 0 else 0
-        end_time = time.time()
+                     fake_preds = torch.argmax(d_output_fake.detach(), dim=1)
+                     fake_acc = (fake_preds == fake_d_labels[:fake_preds.size(0)]).float().mean().item()
 
-        print(f'Epoch {epoch+1}/{epochs} completed | Avg D Loss: {avg_d_loss:.4f}, Avg G Loss: {avg_g_loss:.4f} | Time: {end_time-start_time:.2f} sec')
+                     # Check what D thinks of fake data when G trains
+                     fake_d_preds_for_g = torch.argmax(d_output_fake_for_g.detach(), dim=1)
+                     perc_fake_as_real_pos = (fake_d_preds_for_g == 1).float().mean().item()
+                     perc_fake_as_real_neg = (fake_d_preds_for_g == 0).float().mean().item()
+                     perc_fake_as_fake = (fake_d_preds_for_g == 2).float().mean().item()
 
-        # Save models periodically
-        if (epoch + 1) % 100 == 0 or epoch + 1 == epochs:
-             torch.save(generator.state_dict(), gen_save_path.replace('.pth', f'_epoch{epoch+1}.pth'))
-             torch.save(discriminator.state_dict(), disc_save_path.replace('.pth', f'_epoch{epoch+1}.pth'))
-             print(f"模型权重在 Epoch {epoch+1} 保存到 {gen_save_path.replace('.pth', f'_epoch{epoch+1}.pth')} 等")
+                 print(f'Epoch [{epoch}/{epochs}], Step [{total_steps}], Temp: {current_temp:.4f}, '
+                       f'Loss D: {errD.item():.4f}, Loss G: {errG.item():.4f}, '
+                       f'D Acc Real: {real_acc:.4f}, D Acc Fake: {fake_acc:.4f}, '
+                       f'G Output (perc by D): RP: {perc_fake_as_real_pos:.4f}, RN: {perc_fake_as_real_neg:.4f}, Fake: {perc_fake_as_fake:.4f}')
 
-    # Save final weights
-    torch.save(generator.state_dict(), gen_save_path)
-    torch.save(discriminator.state_dict(), disc_save_path)
-    print("\nGAN训练完成。")
-    print(f"最终生成器权重保存到: {gen_save_path}")
-    print(f"最终判别器权重保存到: {disc_save_path}")
+        epoch_end_time = time.time()
+        print(f'Epoch {epoch} finished in {(epoch_end_time - epoch_start_time):.2f} seconds.')
 
+    # Save models after training
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    torch.save(generator.state_dict(), generator_save_path)
+    torch.save(discriminator.state_dict(), discriminator_save_path)
+    print(f"\nTraining finished. Models saved to {generator_save_path} and {discriminator_save_path}")
+    print(f"Total training time: {(time.time() - start_time):.2f} seconds.")
 
 if __name__ == '__main__':
-    os.makedirs('models/weights', exist_ok=True)
-    train_gan()
+    generator_path = os.path.join(MODELS_DIR, GENERATOR_MODEL_FILE)
+    discriminator_path = os.path.join(MODELS_DIR, DISCRIMINATOR_MODEL_FILE)
+
+    train_gan(epochs=NUM_EPOCHS, batch_size=BATCH_SIZE,
+              lr_g=LR_G, lr_d=LR_D, beta1=BETA1,
+              d_train_ratio=D_TRAIN_RATIO,
+              initial_temp=INITIAL_TEMP, min_temp=MIN_TEMP, annealing_steps=ANNEALING_STEPS,
+              generator_save_path=generator_path, discriminator_save_path=discriminator_path)
