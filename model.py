@@ -155,3 +155,205 @@ class PeptidePredictiveModel(nn.Module):
 
 # Helper function to get input size for the first Conv layer after embedding
 # This needs max_sequence_length and embedding_dim, which we get from init.
+
+class Generator(nn.Module):
+    def __init__(self, vocab_size, embedding_dim, hidden_dim, latent_dim, max_len, pad_idx):
+        super(Generator, self).__init__()
+        self.vocab_size = vocab_size
+        self.max_len = max_len
+        self.pad_idx = pad_idx
+
+        # Project latent noise to initial hidden/cell state
+        self.fc_initial_state = nn.Linear(latent_dim, hidden_dim * 2)  # For h_0 and c_0
+
+        # Embedding layer for input tokens (e.g., previous token)
+        # We'll use the padding token's embedding for the first input step
+        self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=pad_idx)
+
+        # LSTM layer
+        self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True)
+
+        # Output layer: maps hidden state to vocabulary size
+        self.fc_out = nn.Linear(hidden_dim, vocab_size)
+
+        # Gumbel-Softmax for differentiable sampling
+        # Need to define temperature later
+
+    def forward(self, noise, temperature):
+        batch_size = noise.size(0)
+
+        # Project noise to initial hidden and cell state
+        initial_state = self.fc_initial_state(noise).view(batch_size, 2, -1)
+        h_0 = initial_state[:, 0, :].unsqueeze(0).contiguous()  # shape (1, batch_size, hidden_dim)
+        c_0 = initial_state[:, 1, :].unsqueeze(0).contiguous()  # shape (1, batch_size, hidden_dim)
+
+        # Initial input: embedding of a start token or padding token
+        # We'll feed a tensor of pad_idx indices as the "input" for all time steps
+        # The LSTM state will be updated based on the noise initially, and subsequent steps depend on previous output.
+        # A common way is to generate one token at a time in a loop.
+        # Let's implement it as generating step-by-step.
+
+        generated_sequence_onehot = []
+        current_input = torch.full((batch_size, 1), self.pad_idx, dtype=torch.long,
+                                   device=noise.device)  # Use pad_idx as start
+
+        hidden = (h_0, c_0)
+
+        for _ in range(self.max_len):
+            # Get embedding for current input token(s)
+            embedded_input = self.embedding(current_input)  # shape (batch_size, 1, embedding_dim)
+
+            # Pass through LSTM
+            output, hidden = self.lstm(embedded_input, hidden)  # output shape (batch_size, 1, hidden_dim)
+
+            # Get logits for the next token
+            logits = self.fc_out(output.squeeze(1))  # shape (batch_size, vocab_size)
+
+            # Apply Gumbel-Softmax to get a differentiable approximation of one-hot
+            # shape (batch_size, vocab_size)
+            # Note: nn.functional.gumbel_softmax expects input (logits) shape (batch_size, num_classes)
+            one_hot_token = torch.nn.functional.gumbel_softmax(logits, tau=temperature, hard=False)
+
+            # For the *next* input to LSTM, we need an embedding.
+            # We can get the embedding from the one-hot vector.
+            # This simulates feeding the "sampled" token back into the embedding layer.
+            # Note: This is a bit simplified; usually, the Gumbel-Softmax output *is* used directly
+            # for calculating the loss, and the embedding of this approximated one-hot
+            # is used as the input for the *next* step if generating sequentially.
+            # Let's re-think: The standard way for training is to pass the Gumbel-Softmax output
+            # as the input to the *next* step's embedding lookup.
+            # However, LSTM expects fixed time steps. Let's use a simpler approach often seen in text GANs:
+            # Generate all tokens in one go by feeding *something* (like initial state or start token embedding)
+            # to the first step and processing sequentially without feeding back the "sampled" token during the *forward* pass in training.
+            # This requires feeding the LSTM the sequence of embeddings *as if* they were sampled.
+            # Let's stick to the step-by-step generation process which is more natural for sequence generation.
+
+            # Resample for next step input: take the argmax from the Gumbel-Softmax for feeding *back*
+            # This breaks differentiability slightly at the argmax step but the gradients flow through Gumbel-Softmax for the main loss.
+            # Or, a simpler method is to use the *hard* one-hot from gumbel_softmax with straight-through estimator,
+            # or directly use the continuous one-hot output. Let's use the continuous one-hot output.
+
+            # Instead of getting the "index" and re-embedding, multiply one_hot_token by the embedding weights
+            # This effectively gives an embedding corresponding to the weighted average of token embeddings
+            # according to the Gumbel-Softmax probabilities.
+            current_embedded_input = one_hot_token.unsqueeze(1) @ self.embedding.weight.unsqueeze(0)
+            # shape (batch_size, 1, vocab_size) @ (1, vocab_size, embedding_dim) -> (batch_size, 1, embedding_dim)
+
+            # We need to pass *something* at each timestep. A common approach for sequence generation with Gumbel-Softmax GANs:
+            # Treat the LSTM as taking a fixed input (like the noise or a dummy token) at the *first* timestep,
+            # and then using the Gumbel-Softmax output of the *previous* timestep as the input for the *current* timestep.
+
+            # Let's refine: The input to the LSTM at time `t` is the embedding of the chosen token at time `t-1`.
+            # The noise vector initializes the hidden state.
+            # The token for t=1 is generated from the state after processing the initial state (potentially with a dummy input).
+
+            # Revised Step-by-step generation:
+            # t=0: Input is a dummy/start embedding (e.g., pad token embedding or just zeros). State is from noise.
+            # Output for t=1 generated.
+            # t=1: Input is embedding of (Gumbel-Softmax sampled) token from t=1. State is from t=0. Output for t=2 generated.
+            # ... continues for MAX_LEN steps.
+
+            if _ == 0:
+                # First input: embedding of PAD token (or a dedicated START token)
+                lstm_input = self.embedding(
+                    torch.full((batch_size, 1), self.pad_idx, dtype=torch.long, device=noise.device))
+            else:
+                # Input for subsequent steps: embedding based on the *previous* Gumbel-Softmax output
+                # This is the differentiable connection allowing gradients to flow back
+                lstm_input = one_hot_token.unsqueeze(1) @ self.embedding.weight.unsqueeze(0)
+                # lstm_input = one_hot_token.unsqueeze(1) @ self.embedding.weight.t() # Check dimension match, should be batch_size, 1, embedding_dim
+
+            # Pass through LSTM
+            output, hidden = self.lstm(lstm_input, hidden)  # output shape (batch_size, 1, hidden_dim)
+
+            # Get logits for the next token
+            logits = self.fc_out(output.squeeze(1))  # shape (batch_size, vocab_size)
+
+            # Apply Gumbel-Softmax
+            one_hot_token = torch.nn.functional.gumbel_softmax(logits, tau=temperature,
+                                                               hard=False)  # Use hard=True only potentially at the very end of training
+
+            generated_sequence_onehot.append(one_hot_token.unsqueeze(1))  # shape (batch_size, 1, vocab_size)
+
+        # Concatenate one-hot tokens along the sequence dimension
+        generated_sequence_onehot = torch.cat(generated_sequence_onehot,
+                                              dim=1)  # shape (batch_size, max_len, vocab_size)
+
+        return generated_sequence_onehot
+
+    def generate_discrete(self, noise, temperature=0.1):
+        # This method is for actual sampling after training or for evaluation, not training G.
+        # Here we use hard sampling (argmax)
+        batch_size = noise.size(0)
+        initial_state = self.fc_initial_state(noise).view(batch_size, 2, -1)
+        h_0 = initial_state[:, 0, :].unsqueeze(0).contiguous()
+        c_0 = initial_state[:, 1, :].unsqueeze(0).contiguous()
+
+        generated_sequence_indices = []
+        current_input = torch.full((batch_size, 1), self.pad_idx, dtype=torch.long, device=noise.device)
+
+        hidden = (h_0, c_0)
+
+        for _ in range(self.max_len):
+            embedded_input = self.embedding(current_input)  # shape (batch_size, 1, embedding_dim)
+
+            output, hidden = self.lstm(embedded_input, hidden)  # output shape (batch_size, 1, hidden_dim)
+
+            logits = self.fc_out(output.squeeze(1))  # shape (batch_size, vocab_size)
+
+            # Sample token using argmax for discrete generation
+            # Using torch.multinomial would introduce more randomness
+            probs = torch.softmax(logits, dim=1)  # Optional: see probabilities
+            next_token_indices = torch.argmax(logits, dim=1)  # Sample hard
+
+            generated_sequence_indices.append(next_token_indices.unsqueeze(1))  # shape (batch_size, 1)
+
+            # For next input, use the embedding of the hard-sampled token
+            current_input = next_token_indices.unsqueeze(1)
+
+        generated_sequence_indices = torch.cat(generated_sequence_indices, dim=1)  # shape (batch_size, max_len)
+
+        return generated_sequence_indices  # Returns token indices
+
+class Discriminator(nn.Module):
+    def __init__(self, vocab_size, embedding_dim, hidden_dim, num_classes, pad_idx):
+        super(Discriminator, self).__init__()
+        self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=pad_idx)
+        self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True)
+        # Linear layer to map LSTM output to class scores
+        # Option 1: Use final hidden state
+        self.fc = nn.Linear(hidden_dim, num_classes)
+        # Option 2: Use attention or pooling over time steps (more complex)
+        # We'll use the final hidden state of the last layer as a representation of the sequence.
+
+    def forward(self, sequence):
+        # sequence is either integer indices (real data) or one-hot vectors (fake data)
+        if sequence.dtype == torch.long:
+             # Input is integer indices (real data)
+             embedded = self.embedding(sequence) # shape (batch_size, seq_len, embedding_dim)
+        else:
+             # Input is Gumbel-Softmax one-hot vectors (fake data)
+             # The embedding is a matrix multiplication of the one-hot vector and the embedding matrix
+             embedded = torch.bmm(sequence, self.embedding.weight.unsqueeze(0).expand(sequence.size(0), -1, -1))
+             # Check shapes: sequence (batch, len, vocab_size), embedding.weight (vocab_size, embed_dim)
+             # @ (batch, len, vocab_size) x (vocab_size, embed_dim) -> (batch, len, embed_dim)
+             # Use torch.matmul directly if sequence shape is (batch, vocab_size) -> (batch, embed_dim)
+             # Wait, Gumbel-Softmax outputs (batch_size, max_len, vocab_size). So use bmm.
+             embedded = torch.matmul(sequence, self.embedding.weight) # shape (batch_size, max_len, embedding_dim)
+             # This essentially takes a weighted average of token embeddings based on the soft probabilities.
+
+        # Pass through LSTM
+        lstm_out, _ = self.lstm(embedded) # lstm_out shape (batch_size, seq_len, hidden_dim)
+
+        # Get the output from the last time step (considering padding)
+        # A common way to handle padding is to get lengths, pack, run LSTM, then unpack
+        # But for a fixed max_len and using padding index, taking the output corresponding
+        # to the *original* last token or simply taking the last output is simpler,
+        # though maybe less robust to padding placement.
+        # Let's use the output from the last time step after processing the full padded sequence.
+        last_output = lstm_out[:, -1, :] # shape (batch_size, hidden_dim)
+
+        # Pass through linear layer
+        logits = self.fc(last_output) # shape (batch_size, num_classes)
+
+        return logits

@@ -7,7 +7,7 @@ import numpy as np
 import os
 import time
 from data_loader import get_gan_dataloader # GAN DataLoader only for real positive samples
-from model.gan_pt import Generator, Discriminator
+from model import Generator, Discriminator
 from utils import NUM_AMINO_ACIDS # Number of actual amino acid characters
 
 def train_gan(data_filepath='data/preprocessed_data.npz', gen_save_path='models/weights/generator_pt.pth', disc_save_path='models/weights/discriminator_pt.pth', epochs=800, batch_size=128, latent_dim=100, log_interval=100):
