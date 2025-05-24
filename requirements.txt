@@ -1,0 +1,12 @@
+# Core libraries
+torch>=1.8.0 # PyTorch for GAN model
+pandas>=1.0.0 # Data manipulation
+numpy>=1.18.0 # Numerical operations
+
+# Machine Learning / Classification
+scikit-learn>=0.24.0 # For data splitting, evaluation metrics (accuracy, classification report, confusion matrix, ROC)
+tabpfn>=0.1.0 # For the predictive classifier (ensure you follow their installation for model weights)
+
+# Plotting (for evaluation)
+matplotlib>=3.3.0 # For plotting ROC curve and confusion matrix
+seaborn>=0.11.0 # For enhanced plotting (e.g., heatmap for confusion matrix)
