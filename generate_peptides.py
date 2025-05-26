@@ -7,7 +7,7 @@ from utils import vocab, MAX_LEN, PAD_TOKEN # Import shared utilities
 from data_generated import BasicDes, Autocorrelation, CTD, PseudoAAC, AAComposition, QuasiSequenceOrder
 
 # Define max length for feature calculation - must be same as used in train_predictive!
-MAX_FEATURE_LEN = 20 # Ensure this matches featured_data_generated.py
+MAX_FEATURE_LEN = 20 # Ensure this matches featured_generated.py
 
 MODELS_DIR = 'models'
 GENERATOR_MODEL_FILE = 'generator_model.pth'
@@ -23,7 +23,7 @@ print(f"Using device for generation/filtering: {device}")
 def calculate_features_for_sequences(sequences):
      """
      Calculates features for a list of sequences using the same functions
-     as featured_data_generated.py. Returns a DataFrame.
+     as featured_generated.py. Returns a DataFrame.
      """
      # Handle potentially empty sequences or sequences with unexpected chars
      # Filter out empty/invalid sequences before calculating features
@@ -48,7 +48,7 @@ def calculate_features_for_sequences(sequences):
      # Ensure column consistency with training data (important for classifier)
      # In a real scenario, you'd load the training feature column names
      # Here, we just return what we got assuming it matches the order/names
-     # from featured_data_generated.py's placeholder implementation.
+     # from featured_generated.py's placeholder implementation.
      # For real use, load original feature_df columns and reindex/align feature_df
 
      # Add original sequences back (needed for output)
