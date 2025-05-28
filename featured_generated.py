@@ -1,91 +1,46 @@
 import pandas as pd
 import os
+import random
 
 # Assuming the script is in the root directory and data_generated is a subdirectory
 from data_generated import BasicDes, Autocorrelation, CTD, PseudoAAC, AAComposition, QuasiSequenceOrder
 
 
-def get_sequence_from_row(row):
-    if 'sequence' in row and pd.notna(row['sequence']):
-        return str(row['sequence'])
-    elif 'Sequence' in row and pd.notna(row['Sequence']):
-        return str(row['Sequence'])
-    return None
-
-
-def calculate_all_descriptors(sequence):
+def calculate_all_descriptors(sequence, count):
     """
     Calculates all descriptors for a given protein sequence.
     """
-    descriptors = {}
+    peptides_descriptor = {}
+    peptide = str(sequence)
 
-    # Basic Descriptors
     try:
-        basic_des = BasicDes.cal_discriptors(sequence)
-        descriptors.update(basic_des)
+        # Calculate descriptors for the sequence
+        AAC = AAComposition.CalculateAAComposition(peptide)
+        DIP = AAComposition.CalculateDipeptideComposition(peptide)
+        MBA = Autocorrelation.CalculateNormalizedMoreauBrotoAutoTotal(peptide, lamba=3)
+        CCTD = CTD.CalculateCTD(peptide)
+        QSO = QuasiSequenceOrder.GetSequenceOrderCouplingNumberTotal(peptide, maxlag=3)
+        PAAC = PseudoAAC._GetPseudoAAC(peptide, lamda=3)
+        APAAC = PseudoAAC.GetAPseudoAAC(peptide, lamda=3)
+        Basic = BasicDes.cal_discriptors(peptide)
+
+        # Update the descriptor dictionary
+        peptides_descriptor.update(AAC)
+        peptides_descriptor.update(DIP)
+        peptides_descriptor.update(MBA)
+        peptides_descriptor.update(CCTD)
+        peptides_descriptor.update(QSO)
+        peptides_descriptor.update(PAAC)
+        peptides_descriptor.update(APAAC)
+        peptides_descriptor.update(Basic)
+
+        if count % 100 == 0:
+            print("No.%d  Peptide: %s" % (count, peptide))
+
     except Exception as e:
-        print(f"Error calculating BasicDes for sequence {sequence[:10]}...: {e}")
+        print(f"Error calculating descriptors for peptide {peptide[:10]}...: {e}")
 
-    # AAComposition, DipeptideComposition
-    try:
-        aac = AAComposition.CalculateAAComposition(sequence)
-        descriptors.update(aac)
-        dipc = AAComposition.CalculateDipeptideComposition(sequence)
-        descriptors.update(dipc)
-        # Spectrum (3-mers) was commented out, keeping it that way unless specified
-        # spec = AAComposition.GetSpectrumDict(sequence)
-        # descriptors.update(spec)
-    except Exception as e:
-        print(f"Error calculating AAComposition/DipeptideComposition for sequence {sequence[:10]}...: {e}")
-
-    # Autocorrelation descriptors
-    try:
-        norm_moreau_broto = Autocorrelation.CalculateNormalizedMoreauBrotoAutoTotal(sequence)
-        descriptors.update(norm_moreau_broto)
-
-        moran_auto = Autocorrelation.CalculateMoranAutoTotal(sequence)
-        descriptors.update(moran_auto)
-
-        geary_auto = Autocorrelation.CalculateGearyAutoTotal(sequence)
-        descriptors.update(geary_auto)
-    except Exception as e:
-        print(f"Error calculating Autocorrelation for sequence {sequence[:10]}...: {e}")
-
-    # CTD descriptors
-    try:
-        ctd_descriptors = CTD.CalculateCTD(sequence)
-        descriptors.update(ctd_descriptors)
-    except Exception as e:
-        print(f"Error calculating CTD for sequence {sequence[:10]}...: {e}")
-
-    # PseudoAAC descriptors
-    try:
-        # Ensure lamda is valid and not greater than sequence length - 1
-        lamda_val_pse = 1
-        if len(sequence) > 1:
-            lamda_val_pse = min(10, len(sequence) - 1)
-
-        pse_aac_type1 = PseudoAAC._GetPseudoAAC(sequence, lamda=lamda_val_pse)
-        descriptors.update(pse_aac_type1)
-
-        pse_aac_type2 = PseudoAAC.GetAPseudoAAC(sequence, lamda=lamda_val_pse)
-        descriptors.update(pse_aac_type2)
-    except Exception as e:
-        print(f"Error calculating PseudoAAC for sequence {sequence[:10]}...: {e}")
-
-    # QuasiSequenceOrder descriptors
-    try:
-        # Ensure maxlag is valid
-        max_lag_qso = 1
-        if len(sequence) > 1:
-            max_lag_qso = min(20, len(sequence) - 1)
-
-        qso_descriptors = QuasiSequenceOrder.GetQuasiSequenceOrder(sequence, maxlag=max_lag_qso)
-        descriptors.update(qso_descriptors)
-    except Exception as e:
-        print(f"Error calculating QuasiSequenceOrder for sequence {sequence[:10]}...: {e}")
-
-    return descriptors
+    return peptides_descriptor
 
 
 def main():
@@ -100,72 +55,75 @@ def main():
         os.makedirs(output_dir)
     output_file = os.path.join(output_dir, "classify.csv")
 
-    # Read data
+    # Read and process grampa.csv
     try:
         df_grampa = pd.read_csv(grampa_file)
-        print(f"Read {len(df_grampa)} sequences from grampa.csv")
+        print(f"Read {len(df_grampa)} entries from grampa.csv")
+        # Extract unique sequences using .unique()
+        grampa_sequences = pd.Series(df_grampa["sequence"].unique())
+        print(f"{len(grampa_sequences)} unique sequences extracted from grampa.csv")
     except FileNotFoundError:
         print(f"Error: {grampa_file} not found.")
-        df_grampa = pd.DataFrame()
+        grampa_sequences = pd.Series(dtype=str)
     except Exception as e:
-        print(f"Error reading {grampa_file}: {e}")
-        df_grampa = pd.DataFrame()
+        print(f"Error processing grampa.csv: {e}")
+        grampa_sequences = pd.Series(dtype=str)
 
+    # Read origin_negative.csv
     try:
         df_negative = pd.read_csv(negative_file)
-        print(f"Read {len(df_negative)} sequences from origin_negative.csv")
+        print(f"Read {len(df_negative)} entries from origin_negative.csv")
+        # Extract unique sequences using .unique()
+        negative_sequences = pd.Series(df_negative["sequence"].unique())
+        print(f"{len(negative_sequences)} unique sequences extracted from origin_negative.csv")
     except FileNotFoundError:
         print(f"Error: {negative_file} not found.")
-        df_negative = pd.DataFrame()
+        negative_sequences = pd.Series(dtype=str)
     except Exception as e:
-        print(f"Error reading {negative_file}: {e}")
-        df_negative = pd.DataFrame()
+        print(f"Error processing origin_negative.csv: {e}")
+        negative_sequences = pd.Series(dtype=str)
 
     all_data_with_descriptors = []
-    processed_peptide_count = 0
+    count = 1  # Counter for peptides
 
-    # Process grampa.csv (limit to 50 sequences)
-    print("Processing grampa.csv...")
-    for index, row in df_grampa.iterrows():
-        if processed_peptide_count >= 50:
-            break
-        sequence = get_sequence_from_row(row)
+    # Process grampa.csv sequences
+    print("Processing grampa.csv sequences...")
+    for sequence in grampa_sequences:
+        if len(sequence) < 6:  # Skip sequences shorter than 6 characters
+            continue
         if sequence and isinstance(sequence, str) and all(c.upper() in PseudoAAC.AALetter for c in sequence):
-            processed_peptide_count += 1
-            print(f"Processing peptide #{processed_peptide_count} (grampa): {sequence}")
-
-            descriptors = calculate_all_descriptors(sequence.upper())
+            descriptors = calculate_all_descriptors(sequence.upper(), count)
             descriptors['sequence'] = sequence
             descriptors['label'] = 1
             all_data_with_descriptors.append(descriptors)
+            count += 1
         elif sequence:
-            print(f"Skipping invalid or non-standard amino acid sequence in grampa.csv row {index + 1}: {sequence}")
+            print(f"Skipping invalid or non-standard amino acid sequence: {sequence}")
         else:
-            print(f"Skipping empty sequence in grampa.csv row {index + 1}")
+            print("Skipping empty sequence")
 
-    # Process origin_negative.csv (limit to 50 sequences)
-    print("Processing origin_negative.csv...")
-    for index, row in df_negative.iterrows():
-        if processed_peptide_count >= 50:
-            break
-        sequence = get_sequence_from_row(row)
+    # Process origin_negative.csv sequences
+    print("Processing origin_negative.csv sequences...")
+    for sequence in negative_sequences:
+        if len(sequence) < 6:  # Skip sequences shorter than 6 characters
+            continue
         if sequence and isinstance(sequence, str) and all(c.upper() in PseudoAAC.AALetter for c in sequence):
-            processed_peptide_count += 1
-            print(f"Processing peptide #{processed_peptide_count} (negative): {sequence}")
-
-            descriptors = calculate_all_descriptors(sequence.upper())
+            descriptors = calculate_all_descriptors(sequence.upper(), count)
             descriptors['sequence'] = sequence
             descriptors['label'] = 0
             all_data_with_descriptors.append(descriptors)
+            count += 1
         elif sequence:
-            print(
-                f"Skipping invalid or non-standard amino acid sequence in origin_negative.csv row {index + 1}: {sequence}")
+            print(f"Skipping invalid or non-standard amino acid sequence: {sequence}")
         else:
-            print(f"Skipping empty sequence in origin_negative.csv row {index + 1}")
+            print("Skipping empty sequence")
 
     # Create DataFrame from all collected data
     if all_data_with_descriptors:
         df_combined = pd.DataFrame(all_data_with_descriptors)
+
+        # Shuffle the data to mix antimicrobial and negative samples
+        df_combined = df_combined.sample(frac=1, random_state=random.randint(0, 1000)).reset_index(drop=True)
 
         # Reorder columns to have 'sequence' and 'label' first
         cols = ['sequence', 'label'] + [col for col in df_combined.columns if col not in ['sequence', 'label']]
