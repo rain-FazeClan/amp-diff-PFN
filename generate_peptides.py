@@ -1,6 +1,7 @@
 import torch
 import os
 import pickle
+import numpy as np
 import pandas as pd
 from model import Generator, EMBEDDING_DIM, HIDDEN_DIM, LATENT_DIM # Import model definitions and hyperparameters
 from utils import vocab, MAX_LEN, PAD_TOKEN # Import shared utilities
@@ -8,12 +9,6 @@ from data_generated import BasicDes, Autocorrelation, CTD, PseudoAAC, AAComposit
 
 # Define max length for feature calculation - must be same as used in train_predictive!
 MAX_FEATURE_LEN = 20 # Ensure this matches featured_generated.py
-
-MODELS_DIR = 'models'
-GENERATOR_MODEL_FILE = 'generator_model.pth'
-PREDICTIVE_MODEL_FILE = 'predictive_model.pkl'
-RESULTS_DIR = 'results/generated_peptides'
-OUTPUT_FILE = 'candidate_amps.csv'
 
 # Device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -167,7 +162,7 @@ def generate_and_filter_peptides(generator_path, classifier_path, num_to_generat
 
     # Save candidate sequences
     os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, OUTPUT_FILE)
+    output_path = os.path.join('results/generated_peptides/candidate_amps.csv')
 
     candidate_df = pd.DataFrame({'Sequence': generated_candidate_sequences})
     candidate_df.to_csv(output_path, index=False)
@@ -175,9 +170,9 @@ def generate_and_filter_peptides(generator_path, classifier_path, num_to_generat
 
 
 if __name__ == '__main__':
-    generator_path = os.path.join(MODELS_DIR, GENERATOR_MODEL_FILE)
-    classifier_path = os.path.join(MODELS_DIR, PREDICTIVE_MODEL_FILE)
-    output_dir = RESULTS_DIR
+    generator_path = os.path.join('models/generator_model.pth')
+    classifier_path = os.path.join('modelspredictive_model.pkl')
+    output_dir = 'results/generated_peptides'
 
     # Adjust parameters for generation
     NUM_GENERATE = 10000 # Number of sequences to attempt to generate

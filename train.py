@@ -20,11 +20,6 @@ INITIAL_TEMP = 1.0
 MIN_TEMP = 0.1
 ANNEALING_STEPS = 2000 # Number of training steps over which to anneal temperature
 
-# Model saving
-MODELS_DIR = 'models'
-GENERATOR_MODEL_FILE = 'generator_model.pth'
-DISCRIMINATOR_MODEL_FILE = 'discriminator_model.pth'
-
 # Device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device for GAN training: {device}")
@@ -147,15 +142,15 @@ def train_gan(epochs, batch_size, lr_g, lr_d, beta1, d_train_ratio,
         print(f'Epoch {epoch} finished in {(epoch_end_time - epoch_start_time):.2f} seconds.')
 
     # Save models after training
-    os.makedirs(MODELS_DIR, exist_ok=True)
+    os.makedirs('models', exist_ok=True)
     torch.save(generator.state_dict(), generator_save_path)
     torch.save(discriminator.state_dict(), discriminator_save_path)
     print(f"\nTraining finished. Models saved to {generator_save_path} and {discriminator_save_path}")
     print(f"Total training time: {(time.time() - start_time):.2f} seconds.")
 
 if __name__ == '__main__':
-    generator_path = os.path.join(MODELS_DIR, GENERATOR_MODEL_FILE)
-    discriminator_path = os.path.join(MODELS_DIR, DISCRIMINATOR_MODEL_FILE)
+    generator_path = os.path.join('models/generator_model.pth')
+    discriminator_path = os.path.join('models/discriminator_model.pth')
 
     train_gan(epochs=NUM_EPOCHS, batch_size=BATCH_SIZE,
               lr_g=LR_G, lr_d=LR_D, beta1=BETA1,
