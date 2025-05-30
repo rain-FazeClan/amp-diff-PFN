@@ -81,6 +81,9 @@ def evaluate_classifier_vespa(model_path, vespa_data_path, results_dir):
             print("无法为Vespa序列计算有效特征。跳过评估。")
             return
 
+        # 移除未参与训练的列
+        X_vespa = X_vespa.drop(columns=['sequence'], errors='ignore')
+
         # 创建真实标签（所有为1，表示AMP）
         y_vespa_true = pd.Series([1] * len(X_vespa), name='label')
 
