@@ -4,8 +4,6 @@ from torch.utils.data import Dataset, DataLoader
 import os
 from utils import vocab, MAX_LEN, PAD_TOKEN, AMINO_ACIDS # Import shared utilities
 
-CLASSIFY_DATA_DIR = 'classify_data'
-CLASSIFY_DATA_FILE = 'classify_data.csv'
 
 class GANPeptideDataset(Dataset):
     def __init__(self, classify_csv_path, vocab, max_len):
@@ -43,7 +41,7 @@ def create_gan_dataloader(batch_size, shuffle=True):
     """
     Creates DataLoader for GAN training.
     """
-    classify_csv_path = os.path.join(CLASSIFY_DATA_DIR, CLASSIFY_DATA_FILE)
+    classify_csv_path = os.path.join('classify_data/classify.csv')
     if not os.path.exists(classify_csv_path):
         raise FileNotFoundError(f"Required data file not found: {classify_csv_path}. Please run featured_data_generated.py first.")
 
