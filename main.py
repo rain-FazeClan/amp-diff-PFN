@@ -9,7 +9,7 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 # Import main functions from other scripts
-from featured_generated import generate_features as run_generate_features
+from featured_generated import calculate_all_descriptors as run_generate_features
 from train_predictive import train_classifier as run_train_classifier
 from evaluate_predictive import evaluate_classifier as run_evaluate_classifier
 from train import train_gan as run_train_gan
