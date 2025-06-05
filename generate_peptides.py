@@ -3,12 +3,10 @@ import os
 import pickle
 import numpy as np
 import pandas as pd
-from model import Generator, EMBEDDING_DIM, HIDDEN_DIM, LATENT_DIM # Import model definitions and hyperparameters
+from model import Generator, EMBEDDING_DIM, HIDDEN_DIM, LATENT_DIM
 from utils import vocab, MAX_LEN, PAD_TOKEN # Import shared utilities
-from data_generated import BasicDes, Autocorrelation, CTD, PseudoAAC, AAComposition, QuasiSequenceOrder
+from featured_generated import calculate_all_descriptors
 
-# Define max length for feature calculation - must be same as used in train_predictive!
-MAX_FEATURE_LEN = 20 # Ensure this matches featured_generated.py
 
 # Device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -29,7 +27,7 @@ def calculate_features_for_sequences(sequences):
           return pd.DataFrame() # Return empty dataframe if no valid sequences
 
      # Calculate descriptors (call placeholder functions - must be implemented)
-     basic_des_df = calculate_basic_descriptors(valid_sequences)
+     basic_des_df = calculate_all_descriptors(valid_sequences)
      # autocorrelation_df = calculate_autocorrelation(valid_sequences) # Uncomment when implemented
      # ctd_df = calculate_ctd(valid_sequences) # Uncomment when implemented
      # qso_df = calculate_qso(valid_sequences, max_len=MAX_FEATURE_LEN) # Q-order often needs max_len
@@ -171,7 +169,7 @@ def generate_and_filter_peptides(generator_path, classifier_path, num_to_generat
 
 if __name__ == '__main__':
     generator_path = os.path.join('models/generator_model.pth')
-    classifier_path = os.path.join('modelspredictive_model.pkl')
+    classifier_path = os.path.join('models/predictive_model.pkl')
     output_dir = 'results/generated_peptides'
 
     # Adjust parameters for generation
