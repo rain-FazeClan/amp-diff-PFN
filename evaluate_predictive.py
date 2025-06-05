@@ -8,9 +8,6 @@ import numpy as np
 from featured_generated import calculate_all_descriptors
 
 
-MAX_FEATURE_LEN = 20 # Ensure this matches featured_data_generated.py
-
-
 def calculate_features_for_sequences(sequences):
     """
     使用 featured_generated.py 中的 calculate_all_descriptors 方法

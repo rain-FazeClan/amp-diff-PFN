@@ -1,8 +1,6 @@
 import pandas as pd
 import os
 import random
-
-# Assuming the script is in the root directory and data_generated is a subdirectory
 from data_generated import BasicDes, Autocorrelation, CTD, PseudoAAC, AAComposition, QuasiSequenceOrder
 
 
