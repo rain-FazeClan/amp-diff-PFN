@@ -14,9 +14,9 @@ class GANPeptideDataset(Dataset):
         self.data = pd.read_csv(classify_csv_path)
 
         # Filter out sequences longer than max_len if they exist
-        self.data = self.data[self.data['Sequence'].str.len() <= max_len].copy()
+        self.data = self.data[self.data['sequence'].str.len() <= max_len].copy()
 
-        self.sequences = self.data['Sequence'].tolist()
+        self.sequences = self.data['sequence'].tolist()
         self.labels = self.data['label'].tolist()
         self.vocab = vocab
         self.max_len = max_len
