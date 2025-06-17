@@ -1,14 +1,9 @@
-import torch
-
 # Shared Constants
-MAX_LEN = 20 # Max peptide length for GAN
+MAX_LEN = 25 # Max peptide length for GAN
 VOCABULARY = 'ACDEFGHIKLMNPQRSTVWY' # 20 standard amino acids
 PAD_TOKEN = '<PAD>'
 # Optional START/END tokens if needed for variable length or generation start
-# START_TOKEN = '<START>'
-# END_TOKEN = '<END>'
 AMINO_ACIDS = [PAD_TOKEN] + list(VOCABULARY)
-# AMINO_ACIDS = [PAD_TOKEN, START_TOKEN, END_TOKEN] + list(VOCABULARY) # If using START/END
 
 # Discriminator classes
 # 0: Real Negative (non-AMP)
@@ -24,16 +19,10 @@ class Vocab:
         self.word_to_idx = {aa: i for i, aa in enumerate(amino_acids)}
         self.idx_to_word = {i: aa for i, aa in enumerate(amino_acids)}
         self.pad_idx = self.word_to_idx[pad_token]
-        # Optional: start_idx, end_idx if using START/END tokens
-        # self.start_idx = self.word_to_idx[START_TOKEN]
-        # self.end_idx = self.word_to_idx[END_TOKEN]
         self.vocab_size = len(amino_acids)
 
     def encode(self, sequence):
-        # Ensure sequence only contains valid chars or handle unknown
         encoded = [self.word_to_idx.get(aa, self.pad_idx) for aa in sequence]
-        # Optional: add start/end tokens
-        # encoded = [self.start_idx] + encoded + [self.end_idx]
         return encoded
 
     def decode(self, indices, remove_padding=True):
@@ -41,20 +30,14 @@ class Vocab:
         decoded_seq = "".join(words)
         if remove_padding:
              decoded_seq = decoded_seq.rstrip(self.pad_token)
-        # Optional: remove start/end tokens
-        # if START_TOKEN in decoded_seq: decoded_seq = decoded_seq.replace(START_TOKEN, '')
-        # if END_TOKEN in decoded_seq: decoded_seq = decoded_seq.replace(END_TOKEN, '')
-
         return decoded_seq
 
     def pad_sequence(self, sequence_indices):
-         # Pad sequence to MAX_LEN
          if len(sequence_indices) > MAX_LEN:
              padded = sequence_indices[:MAX_LEN]
          else:
              padded = sequence_indices + [self.pad_idx] * (MAX_LEN - len(sequence_indices))
          return padded
-
 
 # Global Vocab instance
 vocab = Vocab(AMINO_ACIDS)
