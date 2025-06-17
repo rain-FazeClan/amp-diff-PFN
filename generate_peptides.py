@@ -60,7 +60,8 @@ def generate_and_filter_peptides(generator_path, classifier_path, num_to_generat
                           hidden_dim=HIDDEN_DIM,
                           latent_dim=LATENT_DIM,
                           max_len=MAX_LEN,
-                          pad_idx=vocab.pad_idx).to(device)
+                          pad_idx=vocab.pad_idx,
+                          dropout_rate=0.1).to(device)
     generator.load_state_dict(torch.load(generator_path, map_location=device))
     generator.eval() # Set to evaluation mode
 
