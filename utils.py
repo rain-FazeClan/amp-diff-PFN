@@ -1,4 +1,3 @@
-# Shared Constants
 MAX_LEN = 25 # Max peptide length for GAN
 VOCABULARY = 'ACDEFGHIKLMNPQRSTVWY' # 20 standard amino acids
 PAD_TOKEN = '<PAD>'
