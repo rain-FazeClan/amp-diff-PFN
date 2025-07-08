@@ -9,8 +9,9 @@ from model import DiffusionModel, EMBEDDING_DIM, HIDDEN_DIM, DROPOUT_RATE, get_d
 
 # --- Configuration ---
 BATCH_SIZE = 128
-NUM_EPOCHS = 300
+NUM_EPOCHS = 500  # 增加到500
 LR = 1e-4
+DROPOUT_REG = 0.4  # 适度正则化
 
 # Model saving
 MODELS_DIR = 'models'
@@ -32,7 +33,7 @@ def q_sample(x_start, t, noise):
     # noise: (batch, seq, vocab_size)
     # Returns the noised x_t
     batch, seq, vocab_size = x_start.shape
-    a_bar = ALPHA_BAR[t].view(-1, 1, 1).to(x_start.device)
+    a_bar = ALPHA_BAR.to(t.device)[t].view(-1, 1, 1).to(x_start.device)
     return torch.sqrt(a_bar) * x_start + torch.sqrt(1 - a_bar) * noise
 
 def train_diffusion(epochs, batch_size, lr, model_save_path):
@@ -43,8 +44,8 @@ def train_diffusion(epochs, batch_size, lr, model_save_path):
                           hidden_dim=HIDDEN_DIM,
                           max_len=MAX_LEN,
                           pad_idx=vocab.pad_idx,
-                          dropout_rate=DROPOUT_RATE).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+                          dropout_rate=DROPOUT_REG).to(device)  # 使用更大dropout
+    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)  # 加权重衰减
     mse_loss = nn.MSELoss()
 
     print("Starting Diffusion Model training...")
@@ -72,10 +73,64 @@ def train_diffusion(epochs, batch_size, lr, model_save_path):
 
         print(f"Epoch {epoch} finished. Avg Loss: {epoch_loss/(i+1):.4f}")
 
+        # === 每10个epoch做重建率和采样可视化 ===
+        if (epoch+1) % 10 == 0:
+            # 重建率
+            real_batch, _ = next(iter(dataloader))
+            real_batch = real_batch[:16].to(device)
+            recon_acc = calc_recon_acc(model, real_batch, device)
+            print(f"[Eval] Reconstruction Accuracy (t=0, batch=16): {recon_acc:.4f}")
+            # 采样
+            gen_x = sample_ddpm(model, NUM_DIFFUSION_STEPS, (8, MAX_LEN, vocab.vocab_size), device)
+            gen_tokens = onehot_to_token(gen_x)
+            print("[Sample] Example generated sequences:")
+            for idx in range(min(4, gen_tokens.size(0))):
+                seq = gen_tokens[idx].cpu().tolist()
+                aa_seq = vocab.decode(seq)
+                print(f"  {idx+1}: {aa_seq}")
+
     os.makedirs(MODELS_DIR, exist_ok=True)
     torch.save(model.state_dict(), model_save_path)
     print(f"\nTraining finished. Model saved to {model_save_path}")
     print(f"Total training time: {(time.time() - start_time):.2f} seconds.")
+
+def sample_ddpm(model, num_steps, shape, device):
+    """DDPM采样流程，返回(batch, seq, vocab_size)"""
+    x = torch.randn(shape, device=device)
+    for t_ in reversed(range(num_steps)):
+        t = torch.full((shape[0],), t_, device=device, dtype=torch.long)
+        with torch.no_grad():
+            pred_noise = model(x, t)
+        a_bar = ALPHA_BAR.to(device)[t_]
+        a = ALPHA.to(device)[t_]
+        if t_ > 0:
+            noise = torch.randn_like(x)
+        else:
+            noise = torch.zeros_like(x)
+        x = (1 / torch.sqrt(a)) * (x - (1 - a) / torch.sqrt(1 - a_bar) * pred_noise) + torch.sqrt(BETA_SCHEDULE.to(device)[t_]) * noise
+    return x
+
+def onehot_to_token(x):
+    # x: (batch, seq, vocab_size) -> (batch, seq)
+    return torch.argmax(x, dim=-1)
+
+def calc_recon_acc(model, real_sequences, device):
+    # 只做t=0的重建（即直接送入模型反向扩散）
+    model.eval()
+    with torch.no_grad():
+        x_start = to_onehot(real_sequences, vocab.vocab_size).to(device)
+        # 直接加极小噪声，t=0
+        t = torch.zeros(real_sequences.size(0), dtype=torch.long, device=device)
+        noise = torch.randn_like(x_start) * 1e-4
+        x_noisy = q_sample(x_start, t, noise)
+        pred_noise = model(x_noisy, t)
+        # 反推x0
+        a_bar = ALPHA_BAR.to(device)[0]
+        x0_pred = (x_noisy - torch.sqrt(1 - a_bar) * pred_noise) / torch.sqrt(a_bar)
+        tokens_pred = onehot_to_token(x0_pred)
+        acc = (tokens_pred == real_sequences).float().mean().item()
+    model.train()
+    return acc
 
 if __name__ == '__main__':
     model_path = os.path.join(MODELS_DIR, DIFFUSION_MODEL_FILE)
