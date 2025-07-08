@@ -82,10 +82,11 @@ def train_diffusion(epochs, batch_size, lr, model_save_path):
             print(f"[Eval] Reconstruction Accuracy (t=0, batch=16): {recon_acc:.4f}")
             # 采样
             gen_x = sample_ddpm(model, NUM_DIFFUSION_STEPS, (8, MAX_LEN, vocab.vocab_size), device)
-            gen_tokens = onehot_to_token(gen_x)
+            gen_tokens = onehot_to_token_with_temperature(gen_x, temperature=0.9)
             print("[Sample] Example generated sequences:")
             for idx in range(min(4, gen_tokens.size(0))):
                 seq = gen_tokens[idx].cpu().tolist()
+                seq = trim_pad(seq, vocab.pad_idx)
                 aa_seq = vocab.decode(seq)
                 print(f"  {idx+1}: {aa_seq}")
 
@@ -113,6 +114,19 @@ def sample_ddpm(model, num_steps, shape, device):
 def onehot_to_token(x):
     # x: (batch, seq, vocab_size) -> (batch, seq)
     return torch.argmax(x, dim=-1)
+
+def onehot_to_token_with_temperature(x, temperature=0.9):
+    # x: (batch, seq, vocab_size)
+    probs = torch.softmax(x / temperature, dim=-1)
+    # 多项分布采样
+    batch, seq, vocab_size = probs.shape
+    probs_2d = probs.view(-1, vocab_size)
+    sampled = torch.multinomial(probs_2d, 1).view(batch, seq)
+    return sampled
+
+def trim_pad(seq, pad_idx):
+    # 截断到第一个pad
+    return seq[:seq.index(pad_idx)] if pad_idx in seq else seq
 
 def calc_recon_acc(model, real_sequences, device):
     # 只做t=0的重建（即直接送入模型反向扩散）
