@@ -6,6 +6,7 @@ numpy>=1.18.0 # Numerical operations
 # Machine Learning / Classification
 scikit-learn>=0.24.0 # For data splitting, evaluation metrics (accuracy, classification report, confusion matrix, ROC)
 tabpfn>=0.1.0 # For the predictive classifier (ensure you follow their installation for model weights)
+xgboost>=1.4.0 # For XGBoost classifier comparison
 
 # Plotting (for evaluation)
 matplotlib>=3.3.0 # For plotting ROC curve and confusion matrix
