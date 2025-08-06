@@ -4,10 +4,10 @@ pandas>=1.0.0
 numpy>=1.18.0
 
 # Machine Learning / Classification
-scikit-learn>=0.24.0 # For data splitting, evaluation metrics (accuracy, classification report, confusion matrix, ROC)
+scikit-learn>=0.24.0
 tabpfn==2.0.7 # 非常重要！其他版本完全不兼容！！！
-xgboost>=1.4.0 # For XGBoost classifier comparison
+xgboost>=1.4.0
 
 # Plotting (for evaluation)
-matplotlib>=3.3.0 # For plotting ROC curve and confusion matrix
-seaborn>=0.11.0 # For enhanced plotting (e.g., heatmap for confusion matrix)
+matplotlib>=3.3.0
+seaborn>=0.11.0
