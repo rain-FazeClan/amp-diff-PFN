@@ -80,7 +80,7 @@ class ExperienceFilter:
             return None
 
         print(f"开始筛选，共有 {len(df)} 个候选肽")
-        print("筛选条件 (基于Vespa数据集特征):")
+        print("筛选条件:")
         print(f"  序列长度: {min_length}-{max_length}")
         print(f"  两亲性指数: ≥{min_amphipathicity}")
         print(f"  净电荷 (pH {ph}): ≥{min_charge}")
@@ -127,11 +127,11 @@ class ExperienceFilter:
                 print(f"筛选结果已保存到: {output_file}")
             return filtered_df
         else:
-            print("没有肽段通过所有筛选条件")
+            print("没有肽通过所有筛选条件")
             return pd.DataFrame()
 
 def main():
-    parser = argparse.ArgumentParser(description='对候选AMP进行经验筛选 (基于Vespa数据集特征)')
+    parser = argparse.ArgumentParser(description='对候选AMP进行经验筛选')
     parser.add_argument('--input', help='输入的候选肽CSV文件路径',
                         default='results/generated_peptides/candidate_amps.csv')
     parser.add_argument('--output', help='输出文件路径',
@@ -161,9 +161,8 @@ def main():
     )
     if filtered_df is not None and len(filtered_df) > 0:
         print(f"\n筛选成功完成！共筛选出 {len(filtered_df)} 个符合条件的AMP候选肽")
-        print("筛选的肽段具有与Vespa数据集相似的理化性质特征")
     else:
-        print("筛选未发现符合条件的肽段")
+        print("筛选未发现符合条件的肽")
 
 if __name__ == "__main__":
     main()
