@@ -1,7 +1,9 @@
-MAX_LEN = 25 # Max peptide length for GAN
-VOCABULARY = 'ACDEFGHIKLMNPQRSTVWY' # 20 standard amino acids
+# 默认参数，可通过命令行调节
+DEFAULT_MAX_LEN = 50  # 考虑到你的序列最长190，设置一个中等默认值
+DEFAULT_BATCH_SIZE = 64
+
+VOCABULARY = 'ACDEFGHIKLMNPQRSTVWY'  # 20 standard amino acids
 PAD_TOKEN = '<PAD>'
-# Optional START/END tokens if needed for variable length or generation start
 AMINO_ACIDS = [PAD_TOKEN] + list(VOCABULARY)
 
 # Discriminator classes
@@ -9,7 +11,6 @@ AMINO_ACIDS = [PAD_TOKEN] + list(VOCABULARY)
 # 1: Real Positive (AMP)
 # 2: Fake (Generated)
 NUM_DISC_CLASSES = 3
-
 
 class Vocab:
     def __init__(self, amino_acids, pad_token=PAD_TOKEN):
@@ -31,11 +32,11 @@ class Vocab:
              decoded_seq = decoded_seq.rstrip(self.pad_token)
         return decoded_seq
 
-    def pad_sequence(self, sequence_indices):
-         if len(sequence_indices) > MAX_LEN:
-             padded = sequence_indices[:MAX_LEN]
+    def pad_sequence(self, sequence_indices, max_len):
+         if len(sequence_indices) > max_len:
+             padded = sequence_indices[:max_len]
          else:
-             padded = sequence_indices + [self.pad_idx] * (MAX_LEN - len(sequence_indices))
+             padded = sequence_indices + [self.pad_idx] * (max_len - len(sequence_indices))
          return padded
 
 # Global Vocab instance
