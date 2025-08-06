@@ -1,5 +1,5 @@
 # 默认参数，可通过命令行调节
-DEFAULT_MAX_LEN = 50  # 考虑到你的序列最长190，设置一个中等默认值
+DEFAULT_MAX_LEN = 190
 DEFAULT_BATCH_SIZE = 64
 
 VOCABULARY = 'ACDEFGHIKLMNPQRSTVWY'  # 20 standard amino acids

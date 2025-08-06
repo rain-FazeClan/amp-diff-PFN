@@ -1,11 +1,11 @@
 # Core libraries
-torch>=1.8.0 # PyTorch for GAN model
-pandas>=1.0.0 # Data manipulation
-numpy>=1.18.0 # Numerical operations
+torch>=1.8.0
+pandas>=1.0.0
+numpy>=1.18.0
 
 # Machine Learning / Classification
 scikit-learn>=0.24.0 # For data splitting, evaluation metrics (accuracy, classification report, confusion matrix, ROC)
-tabpfn>=0.1.0 # For the predictive classifier (ensure you follow their installation for model weights)
+tabpfn==2.0.7 # 非常重要！其他版本完全不兼容！！！
 xgboost>=1.4.0 # For XGBoost classifier comparison
 
 # Plotting (for evaluation)
