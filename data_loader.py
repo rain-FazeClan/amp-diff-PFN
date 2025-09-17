@@ -41,7 +41,7 @@ def create_diffusion_dataloader(batch_size, max_len, shuffle=True):
     """
     Creates DataLoader for Diffusion model training.
     """
-    classify_csv_path = os.path.join('classify_data/classify.csv')
+    classify_csv_path = os.path.join('preprocessed_data/classify.csv')
     if not os.path.exists(classify_csv_path):
         raise FileNotFoundError(
             f"Required data file not found: {classify_csv_path}. Please run featured_data_generated.py first.")

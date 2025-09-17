@@ -176,7 +176,7 @@ def train_classifier(data_path, model_output_path, results_dir, test_sample_frac
         traceback.print_exc()
 
 if __name__ == '__main__':
-    data_path = os.path.join('classify_data/classify.csv')
+    data_path = os.path.join('preprocessed_data/classify.csv')
     model_path = os.path.join('models/predictive_model.pkl')
     eval_results_dir = 'results/predictive_evaluation'
 

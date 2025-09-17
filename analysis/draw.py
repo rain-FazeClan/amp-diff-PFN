@@ -422,7 +422,7 @@ def analyze_training_from_text(log_content: str, output_dir: str = "./analysis_r
 if __name__ == "__main__":
     # Example 1: Analyze AMP length distribution
     try:
-        plot_amp_length_distribution("./classify_data/classify.csv")
+        plot_amp_length_distribution("./preprocessed_data/classify.csv")
     except Exception as e:
         print(f"Error plotting AMP length distribution: {e}")
 

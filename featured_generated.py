@@ -48,7 +48,7 @@ def main():
     negative_file = os.path.join(base_dir, "origin_data", "origin_negative.csv")
 
     # Ensure the output directory exists
-    output_dir = os.path.join(base_dir, "classify_data")
+    output_dir = os.path.join(base_dir, "preprocessed_data")
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     output_file = os.path.join(output_dir, "classify.csv")
